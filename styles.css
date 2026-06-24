@@ -1639,7 +1639,9 @@ body::before {
   justify-content: space-between;
   margin-top: 10px;
 }
-
+.ert{
+  display:flex;gap:12px;display: flex; flex-direction: column; padding: 0px 20px 0px;
+}
 
 @media (max-width: 768px) {
 
@@ -1650,7 +1652,9 @@ body::before {
   .topbar-divider {
     display: none !important;
   }
-
+ .ert{
+    padding: 0px 10px 300px
+    }; 
   /* Topbar компактнее */
   .topbar {
     padding: 0 10px;
