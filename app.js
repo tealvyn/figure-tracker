@@ -6,7 +6,6 @@ function loadState() { try { return JSON.parse(localStorage.getItem(KEY)) || { i
 function persist() { localStorage.setItem(KEY, JSON.stringify(state)); }
 function H(v) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
 function eur(n) { return '€' + Number(n || 0).toFixed(2); }
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxUCs_JhvPzOOaO73BDcvaok-uYd9ZIAM1XqjJQNvaKPiONF1BeXv3W2sd6P1qd0_bomg/exec';
 
 
 async function fetchRates(force = false) {
@@ -581,12 +580,16 @@ if (item.tracking && item.status !== 'Получено' && item.status !== 'В �
 }
 
 // SETTINGS
+// SETTINGS
 function loadSettings() {
   const s = state.settings || {};
   document.getElementById('sRegion').value     = s.region     || 'Япония';
   document.getElementById('sCurrency').value   = s.currency   || 'JPY';
   document.getElementById('sStore').value      = s.store      || '';
   document.getElementById('sShipMethod').value = s.shipMethod || 'small_packet';
+  
+  // Загружаем сохраненную ссылку
+  document.getElementById('sScriptUrl').value  = s.scriptUrl  || '';
 
   // Статистика
   const orders = getOrders();
@@ -601,6 +604,9 @@ function saveSettings() {
     currency:   document.getElementById('sCurrency').value,
     store:      document.getElementById('sStore').value,
     shipMethod: document.getElementById('sShipMethod').value,
+    
+    // Сохраняем ссылку из поля
+    scriptUrl:  document.getElementById('sScriptUrl').value.trim()
   };
   persist();
 }
@@ -628,6 +634,11 @@ function exportData() {
 
 
 async function backupToDrive(silent = false) {
+  const SCRIPT_URL = state.settings?.scriptUrl;
+  if (!SCRIPT_URL) {
+    if (!silent) toast('❌ Сначала укажите ссылку на Google Script в Настройках!');
+    return;
+  }
   const badge = document.getElementById('backupBtn');
   if (!silent) { badge.textContent = 'Сохраняю...'; badge.disabled = true; }
   try {
@@ -647,6 +658,11 @@ async function backupToDrive(silent = false) {
 }
 
 async function loadFromDrive() {
+  const SCRIPT_URL = state.settings?.scriptUrl;
+  if (!SCRIPT_URL) { 
+    toast('❌ Сначала укажите ссылку на Google Script в Настройках!'); 
+    return; 
+  }
   const btn = document.getElementById('loadDriveBtn');
   if (btn) { btn.textContent = '⏳ Загрузка...'; btn.disabled = true; }
   try {
@@ -1587,6 +1603,14 @@ document.getElementById('mainTabs').addEventListener('click', e => {
 })();
 // Обработчик загрузки фото на личный Google Диск (с поддержкой нескольких ссылок)
 document.getElementById('fImgFile').addEventListener('change', function(e) {
+  const SCRIPT_URL = state.settings?.scriptUrl;
+    if (!SCRIPT_URL) {
+      imgInput.value = originalValue;
+      imgInput.placeholder = originalPlaceholder;
+      imgInput.disabled = false;
+      alert('❌ Сначала укажите ссылку на Google Script в Настройках!');
+      return;
+    }
   const file = e.target.files[0];
   if (!file) return;
 

@@ -227,9 +227,15 @@
 
       <!-- Данные -->
       <div class="breakdown">
-        <div class="breakdown-title">Данные</div>
+        <div class="breakdown-title">Данные и Синхронизация</div>
         
-        <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+        <div class="form-group" style="margin-top:10px; margin-bottom:16px;">
+          <div class="form-label">Ссылка на ваш Google Script (API Диска)</div>
+          <input id="sScriptUrl" placeholder="https://script.google.com/macros/s/.../exec" oninput="saveSettings()" style="border-color:var(--accent);" />
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;">Сюда нужно вставить Web App URL вашего развернутого скрипта, чтобы сохранять бэкапы и фото на свой личный Google Диск.</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
               <div style="font-size:13px;font-weight:600;">Экспорт резервной копии</div>
