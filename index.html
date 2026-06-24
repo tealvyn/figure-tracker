@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+  <title>Figure Collection Tracker</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <canvas id="particles"></canvas>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-logo" onclick="selectedOrder=null;render();" style="cursor:pointer;" title="На главную">
+        Figure<span>.</span>Tracker</div>
+      <div class="topbar-right">
+        <span class="rates-badge loading" id="ratesBadge" title="Нажми чтобы обновить"
+          onclick="fetchRates(true)">Загружаю курсы...</span>
+        <button class="btn btn-sm" id="importBtn">Импорт</button>
+        <button class="btn btn-sm" id="exportBtn">Экспорт JSON</button>
+        <button class="btn btn-sm" id="backupBtn">Google Drive</button>
+        <button class="btn btn-primary btn-sm" id="addItemBtn">+ Добавить заказ</button>
+        <input type="file" id="importFile" accept="application/json" style="display:none" />
+      </div>
+    </header>
+    <div class="nav-tabs" id="mainTabs">
+      <div class="nav-tab active" data-tab="collection">📦 Коллекция</div>
+      <div class="nav-tab" data-tab="wishlist">⭐ Вишлист</div>
+      <div class="nav-tab" data-tab="gallery">🖼 Галерея</div>
+      <div class="nav-tab" data-tab="calendar">📅 Календарь</div>
+      <div class="nav-tab" data-tab="analytics">📊 Аналитика</div>
+      <div class="nav-tab" data-tab="shelf">🗂️ Полка</div>
+      <div class="nav-tab" data-tab="settings" style="margin-left:auto;">⚙️ Настройки</div>
+    </div>
+    <div id="releaseBanner"
+      style="display:none;align-items:center;background:rgba(251,191,36,.08);border-bottom:1px solid rgba(251,191,36,.2);padding:8px 20px;font-size:13px;color:var(--yellow);flex-shrink:0;flex-wrap:wrap;gap:6px;">
+    </div>
+    <div class="main">
+      <nav class="sidebar">
+        <div class="sidebar-head">
+          <input class="sidebar-search" id="searchInput" placeholder="Поиск по названию, заказу, магазину..." />
+          <div class="search-suggestions" id="searchSuggestions"></div>
+          <div style="display:flex;gap:8px;">
+            <select id="filterStore"
+              style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;flex:1;">
+              <option value="">Все магазины</option>
+            </select>
+            <select id="filterRegion"
+              style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;flex:1;">
+              <option value="">Все регионы</option>
+            </select>
+          </div>
+          <select id="sortSelect"
+            style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;">
+            <option value="newest">Сначала новые</option>
+            <option value="oldest">Сначала старые</option>
+            <option value="release-asc">📅 Релиз: скоро</option>
+            <option value="release-desc">📅 Релиз: позже</option>
+            <option value="price-desc">Дороже всего</option>
+            <option value="price-asc">Дешевле всего</option>
+            <option value="name">По названию</option>
+          </select>
+          <div class="sidebar-filters" id="statusFilters">
+            <div class="chip active" data-filter="">Все</div>
+            <div class="chip" data-filter="Не оплачено">Не оплачено</div>
+            <div class="chip" data-filter="Депозит оплачен">Депозит</div>
+            <div class="chip" data-filter="Полностью оплачено">Оплачено</div>
+          </div>
+          <label
+            style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;padding:5px 8px;width: 40%;">
+            <input type="checkbox" id="showHiddenToggle" onchange="render()"
+              style="accent-color:var(--green);width:14px;height:14px;">
+            Скрытые
+          </label>
+        </div>
+
+        <div class="order-list" id="orderList"></div>
+      </nav>
+
+      <main class="detail" id="detailPane">
+        <div class="detail-empty">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="3" width="20" height="18" rx="3" />
+            <path d="M8 3v18M16 9h2M16 13h2M16 17h2" />
+          </svg>
+          <div>Выбери посылку слева или добавь первую фигурку</div>
+        </div>
+      </main>
+      <div id="wishlistPane" style="display:none;grid-column:1/-1;overflow-y:auto;padding:20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <div style="font-size:24px;font-weight:800;">⭐ Вишлист</div>
+          <button class="btn btn-primary btn-sm" onclick="openWishForm()">+ Добавить желание</button>
+        </div>
+        <div class="wish-filters">
+          <input class="wish-search-input" id="wishSearch" placeholder="Поиск по вишлисту..." />
+          <select id="wishPriorityFilter" class="wish-filter-select">
+            <option value="">Все приоритеты</option>
+            <option value="high">🔥 Высокий</option>
+            <option value="mid">⭐ Средний</option>
+            <option value="low">💭 Низкий</option>
+          </select>
+        </div>
+        <div class="wish-grid" id="wishGrid"></div>
+      </div>
+    </div>
+  </div>
+  <div id="galleryPane" style="display:none;grid-column:1/-1;overflow-y:auto;padding:20px;">
+    <div class="wish-filters" style="margin-bottom:16px;">
+      <input class="wish-search-input" id="gallerySearch" placeholder="Поиск по галерее..." />
+      <select id="gallerySort" class="wish-filter-select">
+        <option value="newest">Сначала новые</option>
+        <option value="name">По названию</option>
+        <option value="price-desc">Дороже всего</option>
+        <option value="price-asc">Дешевле всего</option>
+      </select>
+      <select id="galleryMaker" class="wish-filter-select">
+        <option value="">Все производители</option>
+      </select>
+    </div>
+    <div class="gallery-stats" id="galleryStats"></div>
+    <div class="gallery-grid" id="galleryGrid"></div>
+  </div>
+  <!-- ПАНЕЛЬ КАЛЕНДАРЯ -->
+  <div id="calendarPane" style="display:none;grid-column:1/-1;overflow-y:auto;padding:20px;">
+    <div class="calendar-header"
+      style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <button class="btn" onclick="changeCalendarYear(-1)">← Прошлый год</button>
+      <div id="calendarYearDisplay" style="font-size:28px;font-weight:900;letter-spacing:-1px;">2026</div>
+      <button class="btn" onclick="changeCalendarYear(1)">Следующий год →</button>
+    </div>
+    <div class="calendar-grid" id="calendarGrid"></div>
+  </div>
+
+  <div id="analyticsPane" style="display:none; grid-column:1/-1; grid-row:3; overflow-y:auto; padding:20px;">
+    <div style="font-size:24px; font-weight:800; margin-bottom:20px;">📊 Аналитика коллекции</div>
+    <div class="analytics-grid">
+      <div class="chart-card donut">
+        <div class="chart-title">Траты по магазинам (€)</div>
+        <canvas id="storeChart"></canvas>
+      </div>
+      <div class="chart-card donut">
+        <div class="chart-title">Траты по производителям (€)</div>
+        <canvas id="makerChart"></canvas>
+      </div>
+      <div class="chart-card" style="grid-column:1/-1;">
+        <div class="chart-title">📅 Расходы по месяцам</div>
+        <div style="position:relative;height:260px;">
+          <canvas id="monthChart"></canvas>
+        </div>
+        <div>
+          <div class="chart-title" style="color:#67e8f9;">■ Не оплачено</div>
+          <div class="chart-title" style="color:#4ade80;">■ Оплачено/получено</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+
+
+  //---------полка-----------
+  <div id="shelfPane"
+    style="position:fixed;top:100px;left:0;right:0;bottom:0;overflow-y:auto;padding:20px;background:var(--bg);z-index:1;display:none;">
+    <div
+      style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+      <h2 style="font-size:20px;font-weight:800;">🗂️ Полка — полученные фигурки</h2>
+      <div id="shelfStats" style="font-size:13px;color:var(--muted);"></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+      <input id="shelfSearch" class="wish-search-input" placeholder="🔍 Поиск..." style="flex:1;min-width:160px;">
+      <select id="shelfSort" class="wish-filter-select">
+        <option value="newest">Сначала новые</option>
+        <option value="name">По названию</option>
+        <option value="price-desc">Дороже всего</option>
+        <option value="price-asc">Дешевле всего</option>
+      </select>
+    </div>
+    <div id="shelfGrid" class="gallery-grid"></div>
+  </div>
+
+  //-------настройки-----------
+  <div id="settingsPane"
+    style="position:fixed;top:100px;left:0;right:0;bottom:0;overflow-y:auto;padding:20px;background:var(--bg);z-index:1;display:none;">
+    <div style="max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
+
+      <h2 style="font-size:20px;font-weight:800;margin-bottom:4px;">⚙️ Настройки</h2>
+
+      <!-- Дефолты формы -->
+      <div class="breakdown" style="position:unset;">
+        <div class="breakdown-title">Значения по умолчанию</div>
+        <div class="form-grid" style="margin-top:10px;">
+          <div class="form-group">
+            <div class="form-label">Регион</div>
+            <select id="sRegion" onchange="saveSettings()">
+              <option value="Япония">Япония</option>
+              <option value="Китай">Китай</option>
+              <option value="США">США</option>
+              <option value="ЕС">ЕС</option>
+              <option value="Другое">Другое</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Валюта</div>
+            <select id="sCurrency" onchange="saveSettings()">
+              <option value="JPY">JPY</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Магазин</div>
+            <input id="sStore" placeholder="AmiAmi" oninput="saveSettings()" />
+          </div>
+          <div class="form-group">
+            <div class="form-label">Метод доставки</div>
+            <select id="sShipMethod" onchange="saveSettings()">
+              <option value="small_packet">Small Packet</option>
+              <option value="ems">EMS</option>
+              <option value="surface">Surface Parcel</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Данные -->
+      <div class="breakdown">
+        <div class="breakdown-title">Данные</div>
+        
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:13px;font-weight:600;">Экспорт резервной копии</div>
+              <div style="font-size:11px;color:var(--muted);">Скачать все данные в JSON</div>
+            </div>
+            <button class="btn btn-sm" onclick="exportData()">📤 Экспорт</button>
+          </div>
+          <div
+            style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:13px;font-weight:600;">Импорт резервной копии</div>
+              <div style="font-size:11px;color:var(--muted);">Загрузить данные из JSON</div>
+            </div>
+            <button class="btn btn-sm" onclick="document.getElementById('importFile').click()">📥 Импорт</button>
+          </div>
+          <div style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-size:13px;font-weight:600;">Google Drive</div>
+            <div style="font-size:11px;color:var(--muted);">Сохранить / загрузить бекап</div>
+          </div>
+          <div style="display:flex;">
+            <button class="btn btn-sm" onclick="backupToDrive(false)">☁️ Сохранить</button>
+          </div>
+        </div>
+          <div
+            style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:13px;font-weight:600;">Загрузить с Google Drive</div>
+              <div style="font-size:11px;color:var(--muted);">Заменить локальные данные данными из Drive</div>
+            </div>
+            <button id="loadDriveBtn" class="btn btn-sm" onclick="loadFromDrive()">☁️ Загрузить</button>
+          </div>
+          <div
+            style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:13px;font-weight:600;">Статистика</div>
+              <div style="font-size:11px;color:var(--muted);" id="settingsStats">—</div>
+            </div>
+          </div>
+          <div
+            style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--red);">Очистить все данные</div>
+              <div style="font-size:11px;color:var(--muted);">Удалить всю коллекцию и вишлист</div>
+            </div>
+            <button class="btn btn-sm btn-danger" onclick="clearAllData()">🗑️ Очистить</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- О приложении -->
+      <div class="breakdown">
+        <div class="breakdown-title">О приложении</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.7;">
+          <div>📦 Figure Collection Tracker</div>
+          <div>Данные хранятся локально в браузере (localStorage)</div>
+          <div style="margin-top:6px;font-size:11px;">Делай бекапы регулярно!</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ЛАЙТБОКС (ГАЛЕРЕЯ НА ВЕСЬ ЭКРАН) -->
+  <div class="lightbox-overlay" id="lightboxOverlay" style="display:none;" onclick="closeLightbox()">
+    <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+    <img id="lightboxImg" src="" alt="" onclick="event.stopPropagation()">
+  </div>
+  <div class="form-overlay" id="formOverlay" style="display:none">
+    <div class="form-panel">
+      <div class="form-title">
+        <span id="formTitle">Добавить фигурку</span>
+        <button class="btn btn-icon" onclick="closeForm()">✕</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group full">
+          <div class="form-label">Название фигурки *</div>
+          <input id="fName" placeholder="Hatsune Miku Rabbit Hole" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Номер заказа *</div>
+          <input id="fOrder" placeholder="А23456789" list="orderSuggestions" />
+          <datalist id="orderSuggestions"></datalist>
+        </div>
+        <div class="form-group">
+          <div class="form-label">Название посылки</div>
+          <input id="fOrderName" placeholder="Сентябрь 2026: Miku + AMG" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Магазин</div>
+          <input id="fStore" placeholder="AmiAmi" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Трек-номер (для всей посылки)</div>
+          <input id="fTracking" placeholder="JJFI00000000000000000" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Дата заказа</div>
+          <input id="fOrderDate" type="date"
+            style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;box-sizing:border-box;" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Дата отправки</div>
+          <input id="fShipDate" type="date"
+            style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;box-sizing:border-box;" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Регион отправки</div>
+          <select id="fRegion">
+            <option value="Япония">Япония</option>
+            <option value="Китай">Китай</option>
+            <option value="США">США</option>
+            <option value="ЕС">ЕС</option>
+            <option value="Другое">Другое</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <div class="form-label">Производитель</div>
+          <input id="fMaker" placeholder="Good Smile Company" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Тип / Масштаб</div>
+          <select id="fScale"
+            style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;">
+            <option value="">— не указано —</option>
+            <option value="small">Мелкий (Нендо, Prize, PUP, 1/64) ~15€</option>
+            <option value="standard">Стандарт (Scale 1/7, 1/6) ~25€</option>
+            <option value="large">Большой (Scale 1/4, диорама) ~50€</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <div class="form-label">Дата выхода</div>
+          <div style="display:flex;gap:8px;">
+            <select id="fDateMonth"
+              style="flex:1;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;">
+              <option value="">— месяц —</option>
+              <option>Январь</option>
+              <option>Февраль</option>
+              <option>Март</option>
+              <option>Апрель</option>
+              <option>Май</option>
+              <option>Июнь</option>
+              <option>Июль</option>
+              <option>Август</option>
+              <option>Сентябрь</option>
+              <option>Октябрь</option>
+              <option>Ноябрь</option>
+              <option>Декабрь</option>
+            </select>
+            <input id="fDateYear" type="number" placeholder="2026" min="2020" max="2035"
+              style="width:90px;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;" />
+          </div>
+        </div>
+        <div class="form-group full">
+          <div class="form-label">Фото (ссылки через запятую)</div>
+          <textarea id="fImg" placeholder="https://img.amiami.com/1.jpg, https://img.amiami.com/2.jpg"
+            style="width:100%;min-height:60px;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+        </div>
+        <div class="form-group full">
+          <div class="form-label">Ссылка на страницу товара</div>
+          <input id="fShopUrl" placeholder="https://www.amiami.com/eng/detail/?gcode=..." type="url" />
+        </div>
+        <div class="form-group full">
+          <div class="form-label">Цена товара</div>
+          <div class="price-row">
+            <div class="form-group">
+              <input id="fPrice" type="number" step="0.01" placeholder="11430" oninput="updateEurPreview()" />
+            </div>
+            <div class="form-group">
+              <select id="fCurrency" onchange="updateEurPreview()">
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="JPY" selected>JPY</option>
+              </select>
+            </div>
+          </div>
+          <div class="eur-preview" id="eurPreview"></div>
+        </div>
+        <div class="form-group">
+          <div class="form-label">Доставка EUR (весь заказ)</div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="fShipping" type="number" step="0.01" placeholder="авто"
+              style="flex:2;min-width:0;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;" />
+            <select id="fShipMethod"
+              style="flex:2;min-width:0;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;">
+              <option value="small_packet">Small Packet</option>
+              <option value="ems">EMS (быстро)</option>
+              <option value="surface">Surface Parcel</option>
+            </select>
+            <button type="button" class="btn btn-sm" onclick="estimateShipping()"
+              title="Рассчитать по типу фигурки">🧮</button>
+          </div>
+          <div class="eur-preview" style="color:var(--muted)">Общая на весь заказ</div>
+        </div>
+        <div class="form-group">
+          <div class="form-label">Предоплата EUR (весь заказ)</div>
+          <input id="fDeposit" type="number" step="0.01" placeholder="0.00" />
+        </div>
+        <div class="form-group full">
+
+          <div class="form-label">Теги / серии (через запятую)</div>
+          <input id="fTags" placeholder="Hololive, Nendo, Prize...">
+          <div id="tagSuggestions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+        </div>
+      </div>
+      <div class="form-group full">
+        <div class="form-label">Статус оплаты</div>
+        <select id="fStatus">
+          <option>Не оплачено</option>
+          <option>Депозит оплачен</option>
+          <option>Полностью оплачено</option>
+          <option>В пути</option>
+          <option>Получено</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:12px;display: flex; flex-direction: column; padding: 0px 20px 0px;">
+
+      <!-- Сохранить -->
+      <button class="modal-action-btn" data-tip="Сохранить" onclick="saveItem()"
+        style="border-color:var(--green);color:var(--green);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </button>
+
+      <!-- Отмена / закрыть -->
+      <button class="modal-action-btn danger" data-tip="Отмена" onclick="closeForm()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+
+
+    </div>
+  </div>
+  </div>
+  <div class="modal-overlay" id="modalOverlay" style="display:none" onclick="if(event.target===this)closeModal()">
+    <div class="modal-wrap">
+      <div class="modal-box">
+        <div style="position:relative;display:inline-flex;align-items:center;justify-content:center;max-width:100%;">
+          <button id="modalImgPrev"
+            style="display:none;position:absolute;left:8px;background:rgba(0,0,0,.6);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;align-items:center;justify-content:center;z-index:2;">‹</button>
+          <img class="modal-img" id="modalImg" src="" alt="" />
+          <button id="modalImgNext"
+            style="display:none;position:absolute;right:8px;background:rgba(0,0,0,.6);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;align-items:center;justify-content:center;z-index:2;">›</button>
+          <span id="modalImgCounter"
+            style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:#fff;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:20px;"></span>
+        </div>
+        <div class="modal-body">
+          <div class="modal-name" id="modalName"></div>
+          <div id="modalRows"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-action-btn" id="modalClose" onclick="closeModal()" data-tip="Закрыть">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+        <button class="modal-action-btn" id="modalMove" data-tip="Заказал! → в коллекцию" style="display:none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
+        </button>
+        <button id="modalReceive" class="modal-action-btn" data-tip="Получено!" style="display:none;">
+          <!-- галочка -->
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </button>
+        <button class="modal-action-btn" id="modalEdit" data-tip="Редактировать">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+        </button>
+        <button class="modal-action-btn danger" id="modalDelete" data-tip="Удалить">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6M14 11v6" />
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+  </div>
+  </div>
+  <div class="form-overlay" id="wishFormOverlay" style="display:none">
+    <div class="form-panel">
+      <div class="form-title">
+        <span id="wishFormTitle">Добавить в вишлист</span>
+        <button class="btn btn-icon" onclick="closeWishForm()">✕</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group full">
+          <div class="form-label">Название *</div><input id="wName" placeholder="Hatsune Miku Sunset Ver." />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Магазин</div><input id="wStore" placeholder="AmiAmi" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Производитель</div><input id="wMaker" placeholder="GSC" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Ожидаемая цена</div><input id="wPrice" type="number" placeholder="15000" />
+        </div>
+        <div class="form-group">
+          <div class="form-label">Валюта</div><select id="wCurrency">
+            <option value="JPY" selected>JPY</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <div class="form-label">Дата выхода</div><input id="wDate" placeholder="2027" />
+        </div>
+        <div class="form-group full">
+          <div class="form-label">Ссылка на картинку</div><textarea id="wImg"
+            placeholder="https://img.amiami.com/1.jpg, https://img.amiami.com/2.jpg"
+            style="width:100%;min-height:60px;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+        </div>
+        <div class="form-group full">
+          <div class="form-label">Ссылка на страницу товара</div><input id="wShopUrl"
+            placeholder="https://www.amiami.com/..." type="url" />
+        </div>
+        <div class="form-group full">
+          <div class="form-label">Заметки</div><textarea id="wNotes" placeholder="Хочу на день рождения..."></textarea>
+        </div>
+        <div class="form-group full">
+          <div class="form-label">Приоритет</div>
+          <select id="wPriority">
+            <option value="high">🔥 Высокий — куплю точно</option>
+            <option value="mid" selected>⭐ Средний — хочу но не срочно</option>
+            <option value="low">💭 Низкий — если найду дёшево</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="saveWish()">Сохранить</button>
+        <button class="btn" onclick="closeWishForm()">Отмена</button>
+      </div>
+    </div>
+
+
+  </div>
+  <script src="app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</body>
+
+</html>
