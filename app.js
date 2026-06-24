@@ -624,7 +624,7 @@ function exportData() {
 }
 
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxIor-dHTjUmrR2_eoqaN6nJPCHl6Q2WTeuJV0-YBJOwOVgg_E6u3Ex23SMRfIn1-5zTQ/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyodzOLMZKXhyTT3bHoNzNgIRBG1apw-pYs9K4KaEphQd-JIyNbRnlS09ONU6A-zdC8yQ/exec';
 
 async function backupToDrive(silent = false) {
   const badge = document.getElementById('backupBtn');
