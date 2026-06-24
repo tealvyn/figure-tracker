@@ -6,6 +6,8 @@ function loadState() { try { return JSON.parse(localStorage.getItem(KEY)) || { i
 function persist() { localStorage.setItem(KEY, JSON.stringify(state)); }
 function H(v) { return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
 function eur(n) { return '€' + Number(n || 0).toFixed(2); }
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxUCs_JhvPzOOaO73BDcvaok-uYd9ZIAM1XqjJQNvaKPiONF1BeXv3W2sd6P1qd0_bomg/exec';
+
 
 async function fetchRates(force = false) {
   const badge = document.getElementById('ratesBadge');
@@ -624,7 +626,6 @@ function exportData() {
 }
 
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyodzOLMZKXhyTT3bHoNzNgIRBG1apw-pYs9K4KaEphQd-JIyNbRnlS09ONU6A-zdC8yQ/exec';
 
 async function backupToDrive(silent = false) {
   const badge = document.getElementById('backupBtn');
@@ -1584,7 +1585,73 @@ document.getElementById('mainTabs').addEventListener('click', e => {
   init();
   draw();
 })();
+// Обработчик загрузки фото на личный Google Диск (с поддержкой нескольких ссылок)
+document.getElementById('fImgFile').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
 
+  const imgInput = document.getElementById('fImg');
+  const originalValue = imgInput.value; // Запоминаем старые ссылки (всю строку)
+  const originalPlaceholder = imgInput.placeholder;
+  
+  // Визуально показываем, что процесс идёт
+  imgInput.value = '⏳ Добавление фото на Google Диск...';
+  imgInput.disabled = true;
+
+  const reader = new FileReader();
+  
+  reader.onload = async function(event) {
+    const base64Data = event.target.result;
+    const base64Content = base64Data.split(',')[1];
+
+    const payload = {
+      action: 'uploadImage',
+      filename: file.name,
+      mimeType: file.type,
+      base64: base64Content
+    };
+
+    try {
+      const response = await fetch(SCRIPT_URL, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      
+      const result = await response.json();
+
+      if (result.ok && result.url) {
+        // МАГИЯ ЗДЕСЬ: Проверяем, было ли поле пустым
+        const existingLinks = originalValue.trim();
+        
+        if (existingLinks) {
+          // Если ссылки уже были, смотрим, не заканчивается ли строка уже на запятую
+          imgInput.value = existingLinks.endsWith(',') 
+            ? `${existingLinks} ${result.url}` 
+            : `${existingLinks}, ${result.url}`;
+        } else {
+          // Если поле было абсолютно пустым
+          imgInput.value = result.url;
+        }
+
+        if (typeof toast === 'function') toast('📸 Фото добавлено в галерею!');
+      } else {
+        imgInput.value = originalValue; // Возвращаем всё назад при ошибке сервера
+        alert('Ошибка Google Диска: ' + (result.error || 'Не удалось получить ссылку'));
+      }
+    } catch (err) {
+      imgInput.value = originalValue; // Возвращаем всё назад, если лёг интернет
+      alert('Ошибка сети: ' + err.message);
+    } finally {
+      imgInput.placeholder = originalPlaceholder;
+      imgInput.disabled = false;
+      e.target.value = ''; // Сбрасываем выбор файла, чтобы можно было загрузить его же
+    }
+  };
+  
+  reader.readAsDataURL(file);
+});
+
+//------------EventListener--------------
 document.getElementById('wishSearch')?.addEventListener('input', renderWishlist);
 document.getElementById('wishPriorityFilter')?.addEventListener('change', renderWishlist);
 document.getElementById('shelfSearch')?.addEventListener('input', renderShelf);
