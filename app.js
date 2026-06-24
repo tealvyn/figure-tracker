@@ -694,7 +694,7 @@ if (!document.getElementById('autoBackupBar')) {
 setInterval(() => {
   autoBackupBar.innerHTML = '<span style="color:var(--yellow)">●</span> Сохранение...';
   backupToDrive(true);
-}, 10 * 60 * 1000);
+}, 30 * 60 * 1000);
 
 
 function updateSuggestions() {
