@@ -1758,7 +1758,7 @@ body::before {
   /* Все фиксированные pane */
   #galleryPane, #calendarPane, #analyticsPane,
   #shelfPane, #settingsPane {
-    top: 90px;
+    top: 95px;
     padding: 12px;
   }
 
