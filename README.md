@@ -1,3 +1,8 @@
+#### Все что ниже делать не обязательно, вы можете сохранять информацию локально, загружая файлы json /// The steps below are optional; you can save the information locally by downloading the JSON files.
+
+
+
+
 ### 🇷🇺 Как пользоваться
 
 1. Перейдите на [https://script.google.com](https://script.google.com)
