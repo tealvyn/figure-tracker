@@ -1161,22 +1161,57 @@ body::before {
 }
 
 /* ── GALLERY ── */
+
 .gallery-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 16px;
-  padding: 4px;
+  columns: 4;
+  column-gap: 10px;
 }
 
 .gallery-card {
-  background: var(--card);
-  border: 1px solid var(--border);
+  break-inside: avoid;
+  margin-bottom: 10px;
   border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
-  transition: transform .18s, box-shadow .18s;
+  position: relative;
 }
 
+.gallery-card img {
+  width: 100%;
+  height: auto;        /* ← натуральное соотношение, без обрезки */
+  display: block;
+  border-radius: 12px;
+  transition: transform 0.2s;
+}
+
+.gallery-card:hover img {
+  transform: scale(1.02);
+}
+
+/* Оверлей — только при наведении */
+.gallery-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 10px;
+  background: linear-gradient(transparent, rgba(0,0,0,0.75));
+  border-radius: 0 0 12px 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.gallery-card:hover .gallery-overlay {
+  opacity: 1;
+}
+
+/* Мобильный — 2 колонки */
+@media (max-width: 768px) {
+  .gallery-grid {
+    columns: 2;
+    column-gap: 8px;
+  }
+}
 .gallery-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
@@ -1299,7 +1334,66 @@ body::before {
   flex-direction: column;
   gap: 8px;
 }
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.92);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
+.lightbox-overlay img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 12px;
+  object-fit: contain;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #fff;
+  border-radius: 999px;
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.lightbox-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #fff;
+  border-radius: 999px;
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lightbox-arrow.left { left: 16px; }
+.lightbox-arrow.right { right: 16px; }
+
+.lightbox-counter {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
+}
 .calendar-item {
   display: flex;
   align-items: center;
@@ -1344,6 +1438,25 @@ body::before {
   font-size: 10px;
   color: var(--muted);
 }
+
+.forecast-row{
+  display:flex;
+  justify-content:space-between;
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+}
+
+.forecast-month{
+  font-weight:700;
+}
+
+.forecast-value{
+  color:var(--green);
+  font-weight:800;
+}
+
+
+
 
 /* ── LIGHTBOX ── */
 .lightbox-overlay {

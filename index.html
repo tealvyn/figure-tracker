@@ -36,8 +36,8 @@
       <div class="nav-tab" data-tab="settings" style="margin-left:auto;">⚙️ Настройки</div>
     </div>
     <div id="releaseBanner"
-      style="display:none;align-items:center;background:rgba(251,191,36,.08);border-bottom:1px solid rgba(251,191,36,.2);padding:8px 20px;font-size:13px;color:var(--yellow);flex-shrink:0;flex-wrap:wrap;gap:6px;">
-    </div>
+     style="display: none; align-items: center; justify-content: center; width: 100%; height: auto; min-height: 35px; padding: 8px 20px; font-size: 13px; flex-shrink: 0; flex-wrap: wrap; gap: 6px; box-sizing: border-box; border-bottom: 1px solid transparent; transition: all 0.3s ease;">
+</div>
     <div class="main">
       <nav class="sidebar">
         <div class="sidebar-head">
@@ -110,6 +110,7 @@
   <div id="galleryPane" style="display:none;grid-column:1/-1;overflow-y:auto;padding:20px;">
     <div class="wish-filters" style="margin-bottom:16px;">
       <input class="wish-search-input" id="gallerySearch" placeholder="Поиск по галерее..." />
+        
       <select id="gallerySort" class="wish-filter-select">
         <option value="newest">Сначала новые</option>
         <option value="name">По названию</option>
@@ -119,6 +120,15 @@
       <select id="galleryMaker" class="wish-filter-select">
         <option value="">Все производители</option>
       </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap;">
+  <input type="checkbox" id="galleryShowHidden" onchange="renderGallery()"
+    style="accent-color:var(--green);width:14px;height:14px;">
+  🙈 Скрытые
+</label>
+      <input type="range" id="colCount" min="2" max="6" value="4" step="1"
+  oninput="document.getElementById('galleryGrid').style.columns=this.value;document.getElementById('colLabel').textContent=this.value"
+  style="width:70px;accent-color:var(--green);">
+<span id="colLabel" style="font-size:12px;color:var(--muted);">4</span>
     </div>
     <div class="gallery-stats" id="galleryStats"></div>
     <div class="gallery-grid" id="galleryGrid"></div>
@@ -145,6 +155,7 @@
         <div class="chart-title">Траты по производителям (€)</div>
         <canvas id="makerChart"></canvas>
       </div>
+      
       <div class="chart-card" style="grid-column:1/-1;">
         <div class="chart-title">📅 Расходы по месяцам</div>
         <div style="position:relative;height:260px;">
@@ -156,6 +167,7 @@
         </div>
 
       </div>
+      
     </div>
   </div>
 
@@ -234,7 +246,23 @@
           <input id="sScriptUrl" placeholder="https://script.google.com/macros/s/.../exec" oninput="saveSettings()" style="border-color:var(--accent);" />
           <div style="font-size:11px;color:var(--muted);margin-top:6px;">Сюда нужно вставить Web App URL вашего развернутого скрипта, чтобы сохранять бэкапы и фото на свой личный Google Диск.</div>
         </div>
+        <!-- Настройки Telegram -->
+      <div class="breakdown" style="margin-top: 15px;">
+        <div class="breakdown-title">Интеграция с Telegram (Хранилище фото)</div>
+        
+        <div class="form-group" style="margin-top:10px; margin-bottom:12px;">
+          <div class="form-label">Telegram Bot Token</div>
+          <input id="sTgBotToken" placeholder="123456789:ABCdefGhI..." oninput="saveSettings()" style="border-color:var(--accent);" />
+        </div>
 
+        <div class="form-group" style="margin-bottom:16px;">
+          <div class="form-label">ID чата / канала (или @username)</div>
+          <input id="sTgChatId" placeholder="@my_figures_channel" oninput="saveSettings()" style="border-color:var(--accent);" />
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;">
+            Создайте приватный или публичный канал, добавьте туда вашего бота как администратора и укажите здесь ID или юзернейм канала.
+          </div>
+        </div>
+      </div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
@@ -257,7 +285,7 @@
             <div style="font-size:11px;color:var(--muted);">Сохранить / загрузить бекап</div>
           </div>
           <div style="display:flex;">
-            <button class="btn btn-sm" onclick="backupToDrive(false)">☁️ Сохранить</button>
+           <button id="backupBtnSettings" class="btn btn-sm" onclick="backupToDrive(false)">☁️ Сохранить</button>
           </div>
         </div>
           <div
@@ -284,9 +312,7 @@
             <button class="btn btn-sm btn-danger" onclick="clearAllData()">🗑️ Очистить</button>
           </div>
         </div>
-      </div>
-
-      <!-- О приложении -->
+         <!-- О приложении -->
       <div class="breakdown">
         <div class="breakdown-title">О приложении</div>
         <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.7;">
@@ -296,14 +322,28 @@
         </div>
       </div>
 
+      </div>
+
     </div>
   </div>
 
   <!-- ЛАЙТБОКС (ГАЛЕРЕЯ НА ВЕСЬ ЭКРАН) -->
-  <div class="lightbox-overlay" id="lightboxOverlay" style="display:none;" onclick="closeLightbox()">
-    <button class="lightbox-close" onclick="closeLightbox()">✕</button>
-    <img id="lightboxImg" src="" alt="" onclick="event.stopPropagation()">
-  </div>
+<div class="lightbox-overlay" id="lightboxOverlay" style="display:none;" onclick="closeLightbox()">
+  <!-- Стрелка влево -->
+  <button class="lightbox-arrow left" onclick="event.stopPropagation();lightboxNav(-1)">‹</button>
+
+  <!-- Картинка -->
+  <img id="lightboxImg" src="" alt="" onclick="event.stopPropagation()">
+
+  <!-- Стрелка вправо -->
+  <button class="lightbox-arrow right" onclick="event.stopPropagation();lightboxNav(1)">›</button>
+
+  <!-- Счётчик -->
+  <div id="lightboxCounter" class="lightbox-counter"></div>
+
+  <!-- Закрыть -->
+  <button class="lightbox-close" onclick="event.stopPropagation();closeLightbox()">✕</button>
+</div>
   <div class="form-overlay" id="formOverlay" style="display:none">
     <div class="form-panel">
       <div class="form-title">
@@ -398,9 +438,12 @@
   </div>
 </div>
         <div class="form-group full">
-          <div class="form-label">Ссылка на страницу товара</div>
-          <input id="fShopUrl" placeholder="https://www.amiami.com/eng/detail/?gcode=..." type="url" />
-        </div>
+  <div class="form-label">Ссылка на страницу товара</div>
+  <div style="display:flex; gap:8px;">
+    <input id="wShopUrl" placeholder="https://www.amiami.com/..." type="url" style="flex:1;" />
+    <button type="button" class="btn btn-sm" id="btnAutofillWish" onclick="grabFromTampermonkey()">🔍 Заполнить</button>
+  </div>
+</div>
         <div class="form-group full">
           <div class="form-label">Цена товара</div>
           <div class="price-row">
@@ -566,9 +609,12 @@
             style="width:100%;min-height:60px;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
         </div>
         <div class="form-group full">
-          <div class="form-label">Ссылка на страницу товара</div><input id="wShopUrl"
-            placeholder="https://www.amiami.com/..." type="url" />
-        </div>
+  <div class="form-label">Ссылка на страницу товара</div>
+  <div style="display:flex; gap:8px;">
+    <input id="fShopUrl" placeholder="https://www.amiami.com/eng/detail/?gcode=..." type="url" style="flex:1;" />
+    <button type="button" class="btn btn-sm" id="btnAutofillMain" onclick="autofillFromLink('main')">🔍 Заполнить</button>
+  </div>
+</div>
         <div class="form-group full">
           <div class="form-label">Заметки</div><textarea id="wNotes" placeholder="Хочу на день рождения..."></textarea>
         </div>

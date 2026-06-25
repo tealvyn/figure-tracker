@@ -257,8 +257,8 @@ function renderSidebar() {
   if (!orders.length) { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px;">Посылок нет. Добавь первую фигурку!</div>'; return; }
   list.innerHTML = orders.map(order => {
     // В template order-item:
-const isHidden = order.items.every(i => i.hidden);
-`<div class="order-item ${isHidden ? 'hidden-order' : ''} ...`
+    const isHidden = order.items.every(i => i.hidden);
+    `<div class="order-item ${isHidden ? 'hidden-order' : ''} ...`
     const c = calcOrder(order); const status = orderStatus(order);
     const thumbs = order.items.slice(0, 4).map(i => i.imageUrl ? `<img class="order-thumb" src="${H(i.imageUrl)}" alt="" onerror="this.style.opacity='.1'">` : `<div class="order-thumb" style="display:flex;align-items:center;justify-content:center;">📦</div>`).join('');
     const extra = order.items.length > 4 ? `<div class="order-thumb-more">+${order.items.length - 4}</div>` : '';
@@ -277,11 +277,11 @@ function renderDetail() {
     const orders = getFiltered();
     const totals = { total: 0, paid: 0, tax: 0 };
     // Мобильная навигация — показать детали, скрыть сайдбар
-const isMobile = window.innerWidth <= 768;
-if (isMobile && selectedOrder) {
-  document.querySelector('.sidebar').classList.add('hidden-mobile');
-  document.getElementById('detailPane').classList.remove('hidden-mobile');
-}
+    const isMobile = window.innerWidth <= 768;
+    if (isMobile && selectedOrder) {
+      document.querySelector('.sidebar').classList.add('hidden-mobile');
+      document.getElementById('detailPane').classList.remove('hidden-mobile');
+    }
     getOrders().forEach(o => {
       const c = calcOrder(o);
       totals.total += Number(c.total);
@@ -392,9 +392,9 @@ if (isMobile && selectedOrder) {
     return `<div class="figure-card animate-in" style="animation-delay:${order.items.indexOf(item) * 40}ms" onclick="openModal('${H(item.id)}')" >${item.imageUrl ? `<img class="figure-img" src="${H(item.imageUrl)}" alt="${H(item.name)}" onerror="this.style.opacity='.1'">` : `<div class="figure-img" style="display:flex;align-items:center;justify-content:center;font-size:36px;">📦</div>`}<div class="figure-body"><div class="figure-name">${H(item.name)}</div><div class="figure-meta">🏭 ${H(item.manufacturer || '—')}</div><div class="figure-meta">📅 Выход: ${H(item.releaseDate || '—')}</div><div class="figure-meta">💱 ${H(String(item.priceOriginal ?? '—'))} ${H(item.currency || '')}${item.currency && item.currency !== 'EUR' ? ` → <span style="color:var(--accent)">${eur(priceEur)}</span>` : ''}</div>${item.shopUrl ? `<a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--accent);text-decoration:none;margin-top:6px;margin-bottom:2px;">🔗 Открыть в магазине</a>` : ''}${item.tags?.length ? `<div class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</div>` : ''} <div class="figure-card-actions"><button class="btn btn-sm" onclick="editItem('${H(item.id)}')">Редактировать</button><button class="btn btn-sm btn-danger" onclick="deleteItem('${H(item.id)}')">Удалить</button></div></div></div>`;
   }).join('');
   // После кнопки payWholeOrder:
-const allReceived = order.items.every(i => i.status === 'Получено');
-const someInTransit = order.items.some(i => i.status === 'В пути' || i.status === 'Полностью оплачено');
-const isHidden = order.items.every(i => i.hidden);
+  const allReceived = order.items.every(i => i.status === 'Получено');
+  const someInTransit = order.items.some(i => i.status === 'В пути' || i.status === 'Полностью оплачено');
+  const isHidden = order.items.every(i => i.hidden);
   const trackingCode = order.items.find(i => i.tracking)?.tracking;
   const trackUrl = trackingCode
     ? (trackingCode.startsWith('JJ') || trackingCode.startsWith('LX') || trackingCode.startsWith('RR'))
@@ -451,25 +451,6 @@ const isHidden = order.items.every(i => i.hidden);
 
 
 
-
-function render() {
-  // обновляем списки магазинов и регионов динамически
-  const orders = getOrders();
-  const stores = [...new Set(orders.map(o => o.store).filter(Boolean))].sort();
-  const regions = [...new Set(orders.flatMap(o => o.items.map(i => i.region)).filter(Boolean))].sort();
-  const storeEl = document.getElementById('filterStore');
-  const regionEl = document.getElementById('filterRegion');
-  if (storeEl) {
-    const sv = storeEl.value;
-    storeEl.innerHTML = '<option value="">Все магазины</option>' + stores.map(s => `<option value="${H(s)}"${s === sv ? ' selected' : ''}>${H(s)}</option>`).join('');
-  }
-  if (regionEl) {
-    const rv = regionEl.value;
-    regionEl.innerHTML = '<option value="">Все регионы</option>' + regions.map(r => `<option value="${H(r)}"${r === rv ? ' selected' : ''}>${H(r)}</option>`).join('');
-  }
-  renderSidebar(); renderDetail();
-}
-
 function openForm() {
   const orders = getOrders();
   const dl = document.getElementById('orderSuggestions');
@@ -489,12 +470,12 @@ function clearForm() {
   document.getElementById('fDateMonth').value = '';
   document.getElementById('fShipMethod').value = 'small_packet';
   // Применяем настройки по умолчанию
-const s = state.settings || {};
-if (s.region)     document.getElementById('fRegion').value     = s.region;
-if (s.currency)   document.getElementById('fCurrency').value   = s.currency;
-if (s.store)      document.getElementById('fStore').value      = s.store;
-if (s.shipMethod) document.getElementById('fShipMethod').value = s.shipMethod;
- renderTagSuggestions();
+  const s = state.settings || {};
+  if (s.region) document.getElementById('fRegion').value = s.region;
+  if (s.currency) document.getElementById('fCurrency').value = s.currency;
+  if (s.store) document.getElementById('fStore').value = s.store;
+  if (s.shipMethod) document.getElementById('fShipMethod').value = s.shipMethod;
+  renderTagSuggestions();
 }
 function addToOrder(orderNum, orderName, store, region) {
   clearForm();
@@ -516,7 +497,7 @@ function editItem(id) {
   const _dp = (item.releaseDate || '').split(' ');
   document.getElementById('fDateMonth').value = _dp[0] || '';
   document.getElementById('fDateYear').value = _dp[1] || '';
- document.getElementById('fTracking').value = item.tracking || '';
+  document.getElementById('fTracking').value = item.tracking || '';
   document.getElementById('fScale').value = item.scale || '';
   document.getElementById('fShipMethod').value = item.shipMethod || 'small_packet';
   document.getElementById('fOrderDate').value = item.orderDate || '';
@@ -551,7 +532,7 @@ function saveItem() {
     region: document.getElementById('fRegion').value,
     manufacturer: document.getElementById('fMaker').value.trim(),
     releaseDate: [document.getElementById('fDateMonth').value, document.getElementById('fDateYear').value].filter(Boolean).join(' '),
-   tracking: document.getElementById('fTracking').value.trim(),
+    tracking: document.getElementById('fTracking').value.trim(),
     scale: document.getElementById('fScale').value,
     shipMethod: document.getElementById('fShipMethod').value,
     orderDate: document.getElementById('fOrderDate').value,
@@ -567,29 +548,33 @@ function saveItem() {
     tags: document.getElementById('fTags').value.split(',').map(t => t.trim()).filter(Boolean),
     rateAtSave: state.rates[document.getElementById('fCurrency').value] ?? 1,
     rateAtSaveDate: editingId ? (state.items.find(i => i.id === editingId)?.rateAtSaveDate || new Date().toLocaleDateString('ru')) : new Date().toLocaleDateString('ru'),
-    createdAt: editingId ? (state.items.find(i => i.id === editingId)?.createdAt || Date.now()) : Date.now()
+    createdAt: editingId ? (state.items.find(i => i.id === editingId)?.createdAt || Date.now()) : Date.now(),
+    hidden: editingId ? (state.items.find(i => i.id === editingId)?.hidden || false) : false,
+    createdAt: editingId ? state.items.find(i => i.id === editingId)?.createdAt : Date.now(),
   };
- // В saveItem(), ПОСЛЕ формирования объекта item, ДО persist():
-if (item.tracking && item.status !== 'Получено' && item.status !== 'В пути') {
-  item.status = 'В пути';
-}
+  // В saveItem(), ПОСЛЕ формирования объекта item, ДО persist():
+  if (item.tracking && item.status !== 'Получено' && item.status !== 'В пути') {
+    item.status = 'В пути';
+  }
   if (editingId) { const idx = state.items.findIndex(i => i.id === editingId); state.items[idx] = item; }
   else state.items.push(item);
   selectedOrder = orderNumber;
   closeForm(); persist(); render(); toast(editingId ? 'Сохранено' : 'Фигурка добавлена!');
 }
-
 // SETTINGS
 // SETTINGS
 function loadSettings() {
   const s = state.settings || {};
-  document.getElementById('sRegion').value     = s.region     || 'Япония';
-  document.getElementById('sCurrency').value   = s.currency   || 'JPY';
-  document.getElementById('sStore').value      = s.store      || '';
+  document.getElementById('sRegion').value = s.region || 'Япония';
+  document.getElementById('sCurrency').value = s.currency || 'JPY';
+  document.getElementById('sStore').value = s.store || '';
   document.getElementById('sShipMethod').value = s.shipMethod || 'small_packet';
-  
+
   // Загружаем сохраненную ссылку
-  document.getElementById('sScriptUrl').value  = s.scriptUrl  || '';
+  document.getElementById('sScriptUrl').value = s.scriptUrl || '';
+  // ЗАГРУЗКА НАСТРОЕК TELEGRAM
+  document.getElementById('sTgBotToken').value = s.tgBotToken || '';
+  document.getElementById('sTgChatId').value = s.tgChatId || '';
 
   // Статистика
   const orders = getOrders();
@@ -600,13 +585,16 @@ function loadSettings() {
 
 function saveSettings() {
   state.settings = {
-    region:     document.getElementById('sRegion').value,
-    currency:   document.getElementById('sCurrency').value,
-    store:      document.getElementById('sStore').value,
+    region: document.getElementById('sRegion').value,
+    currency: document.getElementById('sCurrency').value,
+    store: document.getElementById('sStore').value,
     shipMethod: document.getElementById('sShipMethod').value,
-    
+
     // Сохраняем ссылку из поля
-    scriptUrl:  document.getElementById('sScriptUrl').value.trim()
+    scriptUrl: document.getElementById('sScriptUrl').value.trim(),
+    // СОХРАНЕНИЕ НАСТРОЕК TELEGRAM
+    tgBotToken: document.getElementById('sTgBotToken').value.trim(),
+    tgChatId: document.getElementById('sTgChatId').value.trim()
   };
   persist();
 }
@@ -625,7 +613,7 @@ function exportData() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `figure-tracker-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `figure-tracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
   toast('📤 Бекап сохранён');
@@ -639,29 +627,54 @@ async function backupToDrive(silent = false) {
     if (!silent) toast('❌ Сначала укажите ссылку на Google Script в Настройках!');
     return;
   }
+
   const badge = document.getElementById('backupBtn');
-  if (!silent) { badge.textContent = 'Сохраняю...'; badge.disabled = true; }
+  const btn2 = document.getElementById('backupBtnSettings');
+
+  if (!silent) {
+    [badge, btn2].forEach(b => {
+      if (b) { b.textContent = '⏳ Сохраняю...'; b.disabled = true; }
+    });
+  }
+
   try {
     const res = await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify(state) });
     const data = await res.json();
-    if (!silent) toast(data.ok ? '✅ Сохранено в Google Drive: ' + data.filename : '❌ Ошибка: ' + data.error);
+
+    if (!silent) {
+      [badge, btn2].forEach(b => {
+        if (b) b.textContent = data.ok ? '✅ Сохранено!' : '❌ Ошибка';
+      });
+      setTimeout(() => {
+        if (badge) { badge.textContent = 'Google Drive'; badge.disabled = false; }
+        if (btn2) { btn2.textContent = '☁️ Сохранить'; btn2.disabled = false; }
+      }, 2000);
+      toast(data.ok ? '✅ Сохранено в Google Drive: ' + data.filename : '❌ Ошибка: ' + data.error);
+    }
+
     if (silent && data.ok) {
       const time = new Date().toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
       autoBackupBar.innerHTML = `<span style="color:var(--green)">●</span> Автосохранено в ${time}`;
     }
+
   } catch (err) {
-    if (!silent) toast('❌ Не удалось подключиться к Google Drive');
-    if (silent) autoBackupBar.innerHTML = '<span style="color:var(--red)">●</span> Нет соединения с Google Drive';
-  } finally {
-    if (!silent) { badge.textContent = 'Google Drive'; badge.disabled = false; }
+    if (!silent) {
+      [badge, btn2].forEach(b => {
+        if (b) { b.textContent = '❌ Ошибка'; b.disabled = false; }
+      });
+      toast('❌ Не удалось подключиться к Google Drive');
+    }
+    if (silent) {
+      autoBackupBar.innerHTML = '<span style="color:var(--red)">●</span> Нет соединения с Google Drive';
+    }
   }
 }
 
 async function loadFromDrive() {
   const SCRIPT_URL = state.settings?.scriptUrl;
-  if (!SCRIPT_URL) { 
-    toast('❌ Сначала укажите ссылку на Google Script в Настройках!'); 
-    return; 
+  if (!SCRIPT_URL) {
+    toast('❌ Сначала укажите ссылку на Google Script в Настройках!');
+    return;
   }
   const btn = document.getElementById('loadDriveBtn');
   if (btn) { btn.textContent = '⏳ Загрузка...'; btn.disabled = true; }
@@ -695,8 +708,8 @@ function toggleOrderHidden(orderNumber) {
   });
   persist();
   render();
-  toast(state.items.find(i => i.orderNumber === orderNumber)?.hidden 
-    ? '🙈 Заказ скрыт' 
+  toast(state.items.find(i => i.orderNumber === orderNumber)?.hidden
+    ? '🙈 Заказ скрыт'
     : '👁️ Заказ показан');
 }
 
@@ -762,9 +775,11 @@ document.getElementById('mainTabs').addEventListener('click', e => {
   document.getElementById('wishlistPane').style.display = currentTab === 'wishlist' ? 'block' : 'none';
   document.getElementById('galleryPane').style.display = currentTab === 'gallery' ? 'block' : 'none';
   document.getElementById('settingsPane').style.display = currentTab === 'settings' ? 'block' : 'none';
-if (currentTab === 'settings') loadSettings();
+  if (currentTab === 'settings') loadSettings();
   if (currentTab === 'wishlist') renderWishlist();
   if (currentTab === 'gallery') renderGallery();
+
+  updateBanner(false);
 });
 // График Полочка vs Долги
 function renderShelfChart() {
@@ -955,7 +970,6 @@ function renderAnalytics() {
       }
     }
   });
-
 }
 
 function payWholeOrder(orderNumber) {
@@ -969,7 +983,7 @@ function receiveWholeOrder(orderNumber) {
   state.items.forEach(i => {
     if (i.orderNumber === orderNumber) {
       i.status = 'Получено';
-    }else null;
+    } else null;
   });
   persist();
   render();
@@ -1029,6 +1043,7 @@ function renderGallery() {
   const makerF = document.getElementById('galleryMaker')?.value || '';
 
   let items = [...state.items];
+  items = items.filter(i => !i.hidden);
 
   // Обновить список производителей
   const makers = [...new Set(items.map(i => i.manufacturer).filter(Boolean))].sort();
@@ -1057,17 +1072,42 @@ function renderGallery() {
 
   grid.innerHTML = items.map((item, idx) => {
     const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
-    return `<div class="gallery-card animate-in" style="animation-delay:${idx * 30}ms" onclick="openModal('${H(item.id)}')">
-      <div class="gallery-img-wrap">
-        ${item.imageUrl
-        ? `<img class="zoomable" src="${H(item.imageUrl)}" alt="${H(item.name)}" onerror="this.style.opacity='.1'" onclick="event.stopPropagation(); openLightbox('${H(item.imageUrl)}')">`
-        : `<div class="gallery-placeholder">📦</div>`}
-        <div class="gallery-overlay">
-          <div class="gallery-name">${H(item.name)}</div>
-          ${priceEur ? `<div class="gallery-price">€${priceEur}</div>` : ''}
-        </div>
-      </div>
-    </div>`;
+
+    const imgs = item.imageUrls?.length ? item.imageUrls
+      : item.imageUrl ? [item.imageUrl]
+        : [];
+
+    if (imgs.length === 0) {
+      return `
+        <div class="gallery-card animate-in" 
+             style="animation-delay:${idx * 20}ms; position: relative; aspect-ratio: 1;" 
+             onclick="openModal('${H(item.id)}')">
+          <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:40px; opacity:0.3; background:#111;">📦</div>
+          <div class="gallery-overlay">
+            <div class="gallery-name">${H(item.name)}</div>
+            ${priceEur ? `<div class="gallery-price">€${priceEur.toFixed(2)}</div>` : ''}
+          </div>
+        </div>`;
+    }
+
+    return imgs.map((img, imgIdx) => `
+  <div class="gallery-card animate-in" 
+       style="animation-delay:${(idx + imgIdx) * 20}ms; position: relative; align-self: start;" 
+       onclick="openModal('${H(item.id)}')">
+    
+    <img class="zoomable" src="${H(img)}" alt="${H(item.name)}"
+         style="width: 100%; height: auto; display: block;"
+         onerror="this.closest('.gallery-card').style.display='none'"
+         onclick="event.stopPropagation(); openLightbox('${H(img)}', 'gallery')">
+
+    <div class="gallery-overlay">
+      <div class="gallery-name">${H(item.name)} ${imgs.length > 1 ? `<span style="font-size:11px;opacity:0.7">(${imgIdx + 1}/${imgs.length})</span>` : ''}</div>
+      ${priceEur && imgIdx === 0 ? `<div class="gallery-price">€${priceEur.toFixed(2)}</div>` : ''}
+    </div>
+
+  </div>
+`).join('');
+
   }).join('');
 }
 
@@ -1076,8 +1116,10 @@ function renderGallery() {
 function checkReleaseReminders() {
   const now = new Date();
   const cm = now.getMonth(), cy = now.getFullYear();
+
   const allItems = [...state.items, ...(state.wishlist || [])];
   const months = ['январ', 'феврал', 'март', 'апрел', 'май', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
+
   const upcoming = allItems.filter(item => {
     if (!item.releaseDate) return false;
     const d = item.releaseDate.toLowerCase();
@@ -1088,13 +1130,155 @@ function checkReleaseReminders() {
     const diff = (year - cy) * 12 + (mIdx - cm);
     return diff >= 0 && diff <= 1;
   });
+
+  const unpaidItems = state.items.filter(i =>
+    i.status !== 'Получено' &&
+    i.status !== 'Полностью оплачено'
+  );
+
+  const unpaidTotal = unpaidItems.reduce((sum, i) =>
+    sum + toEur(i.priceOriginal || 0, i.currency || 'EUR')
+    , 0);
+
+  const inTransit = state.items.filter(i => i.status === 'В пути');
+
+  const received = state.items.filter(i => i.status === 'Получено');
+  const totalSpent = received.reduce((s, i) =>
+    s + toEur(i.priceOriginal || 0, i.currency || 'EUR')
+    , 0);
+
+  // Сохраняем данные для баннера
+  state.bannerData = {
+    upcoming,
+    unpaidItems,
+    unpaidTotal,
+    inTransit,
+    stats: {
+      totalItems: state.items.length,
+      received: received.length,
+      wishlist: (state.wishlist || []).length,
+      totalSpent
+    }
+  };
+}
+let bannerIndex = 0;
+
+// Массив со стилями для каждого типа уведомлений
+const BANNER_THEMES = {
+  unpaid: { bg: 'rgba(248,113,113,0.08)', border: 'rgba(248,113,113,0.2)', color: 'var(--red)' },
+  upcoming: { bg: 'rgba(251,191,36,0.08)', border: 'rgba(251,191,36,0.2)', color: 'var(--yellow)' },
+  transit: { bg: 'rgba(74,222,128,0.08)', border: 'rgba(74,222,128,0.2)', color: 'var(--green)' },
+  stats: { bg: 'rgba(103,232,249,0.08)', border: 'rgba(103,232,249,0.2)', color: 'var(--accent)' },
+  fact: { bg: 'rgba(138,147,168,0.08)', border: 'rgba(138,147,168,0.2)', color: 'var(--muted)' }
+};
+
+function updateBanner(advance = false) {
   const banner = document.getElementById('releaseBanner');
   if (!banner) return;
-  if (!upcoming.length) { banner.style.display = 'none'; return; }
-  banner.innerHTML = `<span style="margin-right:8px;">🔔</span><strong>Скоро выходят:</strong> ` + upcoming.map(i => `<span style="color:var(--accent)">${H(i.name)}</span> (${H(i.releaseDate)})`).join(' · ');
+
+  // Показываем ТОЛЬКО на вкладке коллекции
+  if (typeof currentTab !== 'undefined' && currentTab !== 'collection') {
+    banner.style.display = 'none';
+    return;
+  }
+
+  const data = state.bannerData || {};
+  const notices = [];
+
+  // 1. Просроченные / неоплаченные
+  if (data.unpaidItems?.length) {
+    notices.push({
+      type: 'unpaid',
+      text: `💰 Не оплачено ${data.unpaidItems.length} шт. на €${data.unpaidTotal.toFixed(2)}`
+    });
+  }
+
+  // 2. Скорые релизы
+  if (data.upcoming?.length) {
+    const list = data.upcoming
+      .slice(0, 3)
+      .map(i => `${H(i.name)} (${H(i.releaseDate)})`)
+      .join(' · ');
+    notices.push({
+      type: 'upcoming',
+      text: `🔔 Скоро выходят: ${list}`
+    });
+  }
+
+  // 3. Посылки в пути
+  if (data.inTransit?.length) {
+    notices.push({
+      type: 'transit',
+      text: `🚚 В пути: ${data.inTransit.length} фигурок`
+    });
+  }
+
+  // 4. Статистика коллекции
+  if (data.stats) {
+    notices.push({
+      type: 'stats',
+      text: `📦 Коллекция: ${data.stats.totalItems} фигурок · дома ${data.stats.received} · в вишлисте ${data.stats.wishlist}`
+    });
+  }
+
+  // 5. Случайный факт (добавляем всегда в конец)
+  // Чтобы факт не менялся каждую секунду, привяжем его к текущему индексу или минуте
+  notices.push({
+    type: 'fact',
+    text: getFactByTime()
+  });
+
+  const active = notices.filter(n => n && n.text);
+  if (!active.length) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  // Если вызвано по таймеру — шагаем вперед. Если вызвано просто при смене вкладки — берем текущий
+  if (advance) {
+    bannerIndex = (bannerIndex + 1) % active.length;
+  } else if (bannerIndex >= active.length) {
+    bannerIndex = 0; // Защита от выхода за границы массива
+  }
+
+  const currentNotice = active[bannerIndex];
+  const theme = BANNER_THEMES[currentNotice.type] || BANNER_THEMES.fact;
+
+  // Применяем стили темы динамически
+  banner.style.background = theme.bg;
+  banner.style.borderBottomColor = theme.border;
+  banner.style.color = theme.color;
+
+  // Безопасное включение отображения
   banner.style.display = 'flex';
+  banner.innerHTML = currentNotice.text;
 }
 
+// Заменяем рандом на детерминированный выбор, чтобы текст не мигал при каждом обновлении страницы
+function getFactByTime() {
+  const facts = [
+    '🎯 Подсказка: используй теги, чтобы группировать фигурки по сериям',
+    '💾 Делай бекапы в Google Drive, чтобы не потерять коллекцию',
+    '📅 Можно сортировать заказы по ближайшему релизу',
+    '🗂️ Полка показывает только полученные фигурки',
+    '🏷️ Кликаешь по тегам в форме — они подставляются автоматически',
+    '💡 Совет: используй фильтры, чтобы быстро находить нужные фигурки',
+    '⚙️ Настройки позволяют менять валюту и ссылку на Google Script и телеграм-бота',
+  ];
+  // Меняем факт в зависимости от текущей минуты, чтобы он был относительно стабильным
+  const index = Math.floor(Date.now() / 60000) % facts.length;
+  return facts[index];
+}
+
+// ПЕРВЫЙ ЗАПУСК
+checkReleaseReminders();
+updateBanner(false); // Первый запуск без пролистывания
+
+// ТАЙМЕР (здесь мы передаем true, чтобы баннер листался)
+setInterval(() => {
+  checkReleaseReminders();
+  updateBanner(true);
+}, 10000);
 
 // ── WISHLIST ───────────────────────────────────────────
 let editingWishId = null;
@@ -1316,36 +1500,41 @@ function openModal(id) {
     modalImg.src = imgs[imgIdx] || '';
     modalImg.style.display = imgs.length ? 'block' : 'none';
     modalImg.className = 'modal-img ' + (imgs.length ? 'zoomable' : '');
-    modalImg.onclick = imgs.length ? () => openLightbox(imgs[imgIdx], item.name) : null;
+
+    // ИСПРАВЛЕНО: передаем item.id вместо item.name, чтобы лайтбокс знал, чьи это картинки
+    modalImg.onclick = imgs.length ? () => openLightbox(imgs[imgIdx], item.id) : null;
+
     document.getElementById('modalImgCounter').textContent = imgs.length > 1 ? `${imgIdx + 1} / ${imgs.length}` : '';
     document.getElementById('modalImgPrev').style.display = imgs.length > 1 ? 'flex' : 'none';
     document.getElementById('modalImgNext').style.display = imgs.length > 1 ? 'flex' : 'none';
   }
-// В конце openModal(id), после updateModalImg()
-const receiveBtn = document.getElementById('modalReceive');
-if (item.status === 'Получено') {
-  receiveBtn.style.display = 'none';
-} else {
-  receiveBtn.style.display = 'flex';
-  receiveBtn.onclick = () => {
-    state.items.find(i => i.id === id).status = 'Получено';
-    persist();
-    render();
-    renderShelf();
-    toast('✅ Получено! Фигурка добавлена на полку');
-    closeModal();
-  };
-}
+
+  const receiveBtn = document.getElementById('modalReceive');
+  if (item.status === 'Получено') {
+    receiveBtn.style.display = 'none';
+  } else {
+    receiveBtn.style.display = 'flex';
+    receiveBtn.onclick = () => {
+      state.items.find(i => i.id === id).status = 'Получено';
+      persist();
+      render();
+      renderShelf();
+      toast('✅ Получено! Фигурка добавлена на полку');
+      closeModal();
+    };
+  }
+
   document.getElementById('modalImgPrev').onclick = () => { imgIdx = (imgIdx - 1 + imgs.length) % imgs.length; updateModalImg(); };
   document.getElementById('modalImgNext').onclick = () => { imgIdx = (imgIdx + 1) % imgs.length; updateModalImg(); };
 
   updateModalImg();
-  // Стрелки для фото
+
   document.getElementById('modalEdit').onclick = () => { closeModal(); editItem(id); };
   document.getElementById('modalDelete').onclick = () => { if (confirm('Удалить?')) { closeModal(); deleteItem(id); } };
   document.getElementById('modalOverlay').style.display = 'flex';
   document.getElementById('modalMove').style.display = 'none';
 }
+
 function closeModal() {
   document.getElementById('modalOverlay').style.display = 'none'; modalItemId = null; document.getElementById('modalImgPrev').onclick = null;
   document.getElementById('modalImgNext').onclick = null;
@@ -1396,9 +1585,9 @@ function renderShelf() {
     <div class="gallery-card animate-in" style="animation-delay:${idx * 30}ms" onclick="openModal('${H(item.id)}')">
       <div class="gallery-img-wrap">
         ${item.imageUrl
-          ? `<img class="zoomable" src="${H(item.imageUrl)}" alt="${H(item.name)}" onerror="this.style.opacity=.1"
+      ? `<img class="zoomable" src="${H(item.imageUrl)}" alt="${H(item.name)}" onerror="this.style.opacity=.1"
                onclick="event.stopPropagation();openLightbox('${H(item.imageUrl)}','${H(item.name)}')">`
-          : `<div class="gallery-placeholder">🖼️</div>`}
+      : `<div class="gallery-placeholder">🖼️</div>`}
         <div class="gallery-overlay">
           <div class="gallery-name">${H(item.name)}</div>
           <div class="gallery-price">€${item.totalPaid.toFixed(2)}</div>
@@ -1415,16 +1604,108 @@ fetchRates(); render(); checkReleaseReminders();
 
 
 // ── LIGHTBOX ───────────────────────────────────────
-function openLightbox(src) {
-  if (!src) return;
+// ── LIGHTBOX ───────────────────────────────────────
+let lightboxPhotos = [];
+let lightboxIndex = 0;
+let lightboxTouchStartX = null;
+let lightboxTouchStartY = null;
+
+function openLightbox(url, context = 'gallery') {
   const overlay = document.getElementById('lightboxOverlay');
-  document.getElementById('lightboxImg').src = src;
+  if (!overlay) return;
+
+  if (context === 'gallery') {
+    // СЦЕНАРИЙ 1: Открыли из общей галереи -> собираем абсолютно все видимые картинки на экране
+    lightboxPhotos = [...document.querySelectorAll('#galleryGrid img.zoomable')]
+      .map(img => img.src)
+      .filter(Boolean);
+  } else {
+    // СЦЕНАРИЙ 2: Открыли из карточки товара -> ищем фигурку по ID и берём только её фотки
+    const item = state.items.find(i => String(i.id) === String(context));
+    if (item) {
+      lightboxPhotos = item.imageUrls?.length ? item.imageUrls
+        : item.imageUrl ? [item.imageUrl]
+          : [];
+    } else {
+      lightboxPhotos = [url];
+    }
+  }
+
+  // Находим индекс текущей фотографии в сформированном списке
+  lightboxIndex = lightboxPhotos.indexOf(url);
+  if (lightboxIndex === -1) {
+    lightboxPhotos = [url];
+    lightboxIndex = 0;
+  }
+
+  showLightboxPhoto();
   overlay.style.display = 'flex';
+
+  document.addEventListener('keydown', lightboxKeyHandler);
 }
+
+function showLightboxPhoto() {
+  const imgEl = document.getElementById('lightboxImg');
+  const counterEl = document.getElementById('lightboxCounter');
+  if (!imgEl) return;
+
+  imgEl.src = lightboxPhotos[lightboxIndex];
+
+  if (lightboxPhotos.length > 1) {
+    if (counterEl) counterEl.textContent = `${lightboxIndex + 1} / ${lightboxPhotos.length}`;
+  } else {
+    if (counterEl) counterEl.textContent = '';
+  }
+}
+
+function lightboxNav(dir) {
+  if (!lightboxPhotos.length) return;
+  lightboxIndex = (lightboxIndex + dir + lightboxPhotos.length) % lightboxPhotos.length;
+  showLightboxPhoto();
+}
+
+function lightboxKeyHandler(e) {
+  if (e.key === 'ArrowRight') lightboxNav(1);
+  if (e.key === 'ArrowLeft') lightboxNav(-1);
+}
+
 function closeLightbox() {
   document.getElementById('lightboxOverlay').style.display = 'none';
-  document.getElementById('lightboxImg').src = '';
+  document.removeEventListener('keydown', lightboxKeyHandler);
 }
+
+function initLightboxTouch() {
+  const overlay = document.getElementById('lightboxOverlay');
+  if (!overlay) return;
+
+  overlay.addEventListener('touchstart', e => {
+    if (!e.touches.length) return;
+    lightboxTouchStartX = e.touches[0].clientX;
+    lightboxTouchStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  overlay.addEventListener('touchend', e => {
+    if (lightboxTouchStartX === null) return;
+    if (!e.changedTouches.length) return;
+
+    const dx = e.changedTouches[0].clientX - lightboxTouchStartX;
+    const dy = e.changedTouches[0].clientY - lightboxTouchStartY;
+
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) {
+      lightboxTouchStartX = lightboxTouchStartY = null;
+      return;
+    }
+
+    if (dx < 0) {
+      lightboxNav(1);
+    } else {
+      lightboxNav(-1);
+    }
+
+    lightboxTouchStartX = lightboxTouchStartY = null;
+  }, { passive: true });
+}
+
 
 // Улучшенный обработчик Escape для всех модалок и лайтбокса
 document.addEventListener('keydown', e => {
@@ -1602,79 +1883,183 @@ document.getElementById('mainTabs').addEventListener('click', e => {
   draw();
 })();
 // Обработчик загрузки фото на личный Google Диск (с поддержкой нескольких ссылок)
-document.getElementById('fImgFile').addEventListener('change', function(e) {
-  const SCRIPT_URL = state.settings?.scriptUrl;
-    if (!SCRIPT_URL) {
-      imgInput.value = originalValue;
-      imgInput.placeholder = originalPlaceholder;
-      imgInput.disabled = false;
-      alert('❌ Сначала укажите ссылку на Google Script в Настройках!');
-      return;
-    }
+document.getElementById('fImgFile').addEventListener('change', async function (e) {
   const file = e.target.files[0];
   if (!file) return;
 
+  // Сначала объявляем переменные поля ввода, чтобы избежать ошибок в коде
   const imgInput = document.getElementById('fImg');
   const originalValue = imgInput.value; // Запоминаем старые ссылки (всю строку)
   const originalPlaceholder = imgInput.placeholder;
-  
-  // Визуально показываем, что процесс идёт
-  imgInput.value = '⏳ Добавление фото на Google Диск...';
-  imgInput.disabled = true;
 
-  const reader = new FileReader();
-  
-  reader.onload = async function(event) {
-    const base64Data = event.target.result;
-    const base64Content = base64Data.split(',')[1];
+  // Получаем настройки для обоих сервисов
+  const SCRIPT_URL = state.settings?.scriptUrl;
+  const tgBotToken = state.settings?.tgBotToken;
+  const tgChatId = state.settings?.tgChatId;
 
-    const payload = {
-      action: 'uploadImage',
-      filename: file.name,
-      mimeType: file.type,
-      base64: base64Content
-    };
+  // Проверяем, настроен ли хотя бы один способ загрузки
+  if (!SCRIPT_URL && (!tgBotToken || !tgChatId)) {
+    alert('❌ Сначала укажите настройки Telegram или ссылку на Google Script в Настройках!');
+    e.target.value = '';
+    return;
+  }
+
+  // === ВАРИАНТ 1: ЗАГРУЗКА В TELEGRAM (Если заполнены токен и чат) ===
+  if (tgBotToken && tgChatId) {
+    imgInput.value = '⏳ Отправка фото в Telegram...';
+    imgInput.disabled = true;
 
     try {
-      const response = await fetch(SCRIPT_URL, {
+      // 1. Отправляем фото боту в канал/чат
+      const formData = new FormData();
+      formData.append('chat_id', tgChatId);
+      formData.append('photo', file);
+
+      const sendRes = await fetch(`https://api.telegram.org/bot${tgBotToken}/sendPhoto`, {
         method: 'POST',
-        body: JSON.stringify(payload)
+        body: formData
       });
-      
-      const result = await response.json();
+      const sendData = await sendRes.json();
 
-      if (result.ok && result.url) {
-        // МАГИЯ ЗДЕСЬ: Проверяем, было ли поле пустым
-        const existingLinks = originalValue.trim();
-        
-        if (existingLinks) {
-          // Если ссылки уже были, смотрим, не заканчивается ли строка уже на запятую
-          imgInput.value = existingLinks.endsWith(',') 
-            ? `${existingLinks} ${result.url}` 
-            : `${existingLinks}, ${result.url}`;
-        } else {
-          // Если поле было абсолютно пустым
-          imgInput.value = result.url;
-        }
-
-        if (typeof toast === 'function') toast('📸 Фото добавлено в галерею!');
-      } else {
-        imgInput.value = originalValue; // Возвращаем всё назад при ошибке сервера
-        alert('Ошибка Google Диска: ' + (result.error || 'Не удалось получить ссылку'));
+      if (!sendData.ok) {
+        throw new Error(sendData.description || 'Не удалось отправить фото');
       }
-    } catch (err) {
-      imgInput.value = originalValue; // Возвращаем всё назад, если лёг интернет
-      alert('Ошибка сети: ' + err.message);
+
+      // Получаем ID самого большого разрешения картинки
+      const fileId = sendData.result.photo[sendData.result.photo.length - 1].file_id;
+
+      // 2. Запрашиваем у Telegram прямой путь к файлу на сервере
+      const pathRes = await fetch(`https://api.telegram.org/bot${tgBotToken}/getFile?file_id=${fileId}`);
+      const pathData = await pathRes.json();
+
+      if (!pathData.ok) {
+        throw new Error(pathData.description || 'Не удалось получить путь к файлу');
+      }
+
+      const filePath = pathData.result.file_path;
+      const finalImgUrl = `https://api.telegram.org/file/bot${tgBotToken}/${filePath}`;
+
+      // Склеиваем ссылки через запятую (твоя логика галереи)
+      const existingLinks = originalValue.trim();
+      if (existingLinks) {
+        imgInput.value = existingLinks.endsWith(',')
+          ? `${existingLinks} ${finalImgUrl}`
+          : `${existingLinks}, ${finalImgUrl}`;
+      } else {
+        imgInput.value = finalImgUrl;
+      }
+
+      if (typeof toast === 'function') toast('📸 Фото добавлено в Telegram!');
+
+    } catch (error) {
+      console.error(error);
+      imgInput.value = originalValue; // Возвращаем всё назад при ошибке
+      alert('❌ Ошибка загрузки в Telegram: ' + error.message);
     } finally {
       imgInput.placeholder = originalPlaceholder;
       imgInput.disabled = false;
-      e.target.value = ''; // Сбрасываем выбор файла, чтобы можно было загрузить его же
+      e.target.value = ''; // Сбрасываем выбор файла
     }
-  };
-  
-  reader.readAsDataURL(file);
+  }
+  // === ВАРИАНТ 2: ЗАГРУЗКА НА GOOGLE ДИСК (Твой оригинальный код без изменений) ===
+  else {
+    // Визуально показываем, что процесс идёт
+    imgInput.value = '⏳ Добавление фото на Google Диск...';
+    imgInput.disabled = true;
+
+    const reader = new FileReader();
+
+    reader.onload = async function (event) {
+      const base64Data = event.target.result;
+      const base64Content = base64Data.split(',')[1];
+
+      const payload = {
+        action: 'uploadImage',
+        filename: file.name,
+        mimeType: file.type,
+        base64: base64Content
+      };
+
+      try {
+        const response = await fetch(SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (result.ok && result.url) {
+          const existingLinks = originalValue.trim();
+
+          if (existingLinks) {
+            imgInput.value = existingLinks.endsWith(',')
+              ? `${existingLinks} ${result.url}`
+              : `${existingLinks}, ${result.url}`;
+          } else {
+            imgInput.value = result.url;
+          }
+
+          if (typeof toast === 'function') toast('📸 Фото добавлено в галерею!');
+        } else {
+          imgInput.value = originalValue;
+          alert('Ошибка Google Диска: ' + (result.error || 'Не удалось получить ссылку'));
+        }
+      } catch (err) {
+        imgInput.value = originalValue;
+        alert('Ошибка сети: ' + err.message);
+      } finally {
+        imgInput.placeholder = originalPlaceholder;
+        imgInput.disabled = false;
+        e.target.value = '';
+      }
+    };
+
+    reader.readAsDataURL(file);
+  }
 });
 
+async function grabFromTampermonkey() {
+  try {
+    const text = await navigator.clipboard.readText();
+    const data = JSON.parse(text);
+
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val || '';
+    };
+
+    // Заполняем данные
+    setVal('fName', data.name);
+    setVal('fPrice', data.price);
+    setVal('fMaker', data.brand);
+    setVal('fImg', data.img);
+    setVal('fDateMonth', data.month);
+    setVal('fDateYear', data.year);
+    setVal('wShopUrl', data.url);
+
+    alert('✅ Успешно! Данные из Tampermonkey вставлены в форму.');
+  } catch (err) {
+    alert('Ошибка при чтении данных!');
+  }
+}
+
+function render() {
+  // обновляем списки магазинов и регионов динамически
+  const orders = getOrders();
+  const stores = [...new Set(orders.map(o => o.store).filter(Boolean))].sort();
+  const regions = [...new Set(orders.flatMap(o => o.items.map(i => i.region)).filter(Boolean))].sort();
+  const storeEl = document.getElementById('filterStore');
+  const regionEl = document.getElementById('filterRegion');
+  if (storeEl) {
+    const sv = storeEl.value;
+    storeEl.innerHTML = '<option value="">Все магазины</option>' + stores.map(s => `<option value="${H(s)}"${s === sv ? ' selected' : ''}>${H(s)}</option>`).join('');
+  }
+  if (regionEl) {
+    const rv = regionEl.value;
+    regionEl.innerHTML = '<option value="">Все регионы</option>' + regions.map(r => `<option value="${H(r)}"${r === rv ? ' selected' : ''}>${H(r)}</option>`).join('');
+  }
+  renderSidebar(); renderDetail(); initLightboxTouch(); renderWishlist();
+}
 //------------EventListener--------------
 document.getElementById('wishSearch')?.addEventListener('input', renderWishlist);
 document.getElementById('wishPriorityFilter')?.addEventListener('change', renderWishlist);
