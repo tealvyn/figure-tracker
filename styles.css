@@ -30,7 +30,7 @@ body {
 
 .app {
   display: grid;
-  grid-template-rows: 56px auto 1fr;
+  grid-template-rows: 56px auto auto minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
 }
@@ -111,7 +111,8 @@ body {
 
 .main {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: 340px minmax(0, 1fr);
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -120,6 +121,7 @@ body {
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -152,6 +154,33 @@ body {
   flex-wrap: wrap;
 }
 
+.filter-toggle {
+  display: none;
+}
+
+.sidebar-filter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* В настройках карточки не должны быть sticky, иначе на телефоне они налезают друг на друга */
+#settingsPane .breakdown {
+  position: static !important;
+  top: auto !important;
+  margin-top: 0;
+}
+
+#settingsPane > div {
+  width: 100%;
+  max-width: 680px;
+}
+
+#settingsPane .breakdown .breakdown {
+  margin-top: 14px;
+  margin-bottom: 14px;
+}
+
 .chip {
   background: var(--panel-2);
   border: 1px solid var(--line);
@@ -171,6 +200,7 @@ body {
 }
 
 .order-list {
+  min-height: 0;
   overflow-y: auto;
   flex: 1;
   padding: 8px;
@@ -273,6 +303,8 @@ body {
 }
 
 .detail {
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   padding: 20px;
 }
@@ -1280,7 +1312,6 @@ body::before {
   bottom: 0;
   overflow-y: auto;
   padding: 20px;
-  background: var(--bg);
   z-index: 1;
   display: none;
 }
@@ -1534,7 +1565,6 @@ body::before {
   bottom: 0;
   overflow-y: auto;
   padding: 20px;
-  background: var(--bg);
   z-index: 1;
   display: none;
 }
@@ -1766,8 +1796,8 @@ body::before {
     display: none !important;
   }
  .ert{
-    padding: 0px 10px 300px
-    }; 
+    padding: 0px 10px 300px;
+  }
   /* Topbar компактнее */
   .topbar {
     padding: 0 10px;
@@ -1893,5 +1923,334 @@ body::before {
     max-width: 100%;
     max-height: 92dvh;
     border-radius: 20px 20px 0 0;
+  }
+}
+
+/* ── MOBILE FIX: фильтры в drawer + исправление настроек ── */
+@media (max-width: 768px) {
+  body {
+    overflow: hidden;
+  }
+
+  .app {
+    grid-template-rows: 48px auto auto minmax(0, 1fr) !important;
+    min-height: 0;
+  }
+
+  .main {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0;
+    overflow: visible;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .sidebar-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 8px;
+    padding: 10px;
+    position: relative;
+    z-index: 20;
+  }
+
+  #searchInput {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .filter-toggle {
+    grid-column: 2;
+    grid-row: 1;
+    display: inline-flex;
+    height: 38px;
+    padding: 8px 12px;
+    white-space: nowrap;
+  }
+
+  .search-suggestions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .sidebar-filter-body {
+    display: none;
+  }
+
+  .sidebar.filters-open .sidebar-filter-body {
+    display: flex;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    top: 96px;
+    z-index: 300;
+    max-height: calc(100dvh - 112px);
+    overflow-y: auto;
+    padding: 12px;
+    background: rgba(21, 24, 31, .98);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(10px);
+  }
+
+  .sidebar.filters-open .filter-toggle {
+    border-color: var(--green);
+    color: var(--green);
+  }
+
+  .sidebar-filter-body > div[style*="display:flex"] {
+    flex-direction: column !important;
+  }
+
+  #filterStore,
+  #filterRegion,
+  #sortSelect {
+    min-height: 40px;
+  }
+
+  .sidebar-filters {
+    overflow-x: auto;
+    flex-wrap: nowrap !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+
+  .sidebar-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chip {
+    flex: 0 0 auto;
+  }
+
+  #showHiddenToggle {
+    flex: 0 0 auto;
+  }
+
+  .sidebar-filter-body label {
+    width: auto !important;
+  }
+
+  .order-list {
+    max-height: 42dvh;
+    overflow-y: auto;
+  }
+
+  .detail {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .stats-bar {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .orders-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  #galleryPane,
+  #calendarPane,
+  #analyticsPane,
+  #shelfPane,
+  #settingsPane {
+    top: 92px !important;
+    padding: 12px !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #settingsPane > div {
+    max-width: 100% !important;
+    gap: 12px !important;
+  }
+
+  #settingsPane h2 {
+    font-size: 18px !important;
+    margin-bottom: 0 !important;
+  }
+
+  #settingsPane .breakdown {
+    position: static !important;
+    top: auto !important;
+    margin: 0 0 12px 0 !important;
+    padding: 12px !important;
+  }
+
+  #settingsPane .breakdown .breakdown {
+    margin-top: 12px !important;
+  }
+
+  #settingsPane .form-grid {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  #settingsPane [style*="justify-content:space-between"] {
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+    align-items: flex-start !important;
+  }
+
+  #settingsPane .btn {
+    min-height: 36px;
+  }
+}
+
+
+/* ── STABILITY / MOBILE POLISH ── */
+.mobile-back {
+  display: none !important;
+}
+
+.order-item,
+.order-grid-card,
+.figure-card,
+.wish-card,
+.gallery-card,
+.calendar-month {
+  content-visibility: auto;
+  contain-intrinsic-size: 180px;
+}
+
+@media (max-width: 768px) {
+  .topbar-logo {
+    font-size: 16px;
+    flex: 0 0 auto;
+  }
+
+  #addItemBtn {
+    padding-inline: 12px;
+    min-height: 34px;
+  }
+
+  .detail-header {
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .detail-header .mobile-back {
+    display: inline-flex !important;
+    width: fit-content;
+    margin-bottom: 2px;
+  }
+
+  .detail-header > div {
+    min-width: 0;
+  }
+
+  .detail-title {
+    font-size: 20px;
+    word-break: break-word;
+  }
+
+  .detail-actions {
+    width: 100%;
+  }
+
+  .detail-actions .btn,
+  .detail-actions .badge {
+    min-height: 34px;
+  }
+
+  .sidebar.hidden-mobile {
+    display: none !important;
+  }
+
+  .detail.hidden-mobile {
+    display: none !important;
+  }
+
+  .sidebar.filters-open .sidebar-filter-body {
+    display: flex !important;
+  }
+
+  .sidebar-filter-body {
+    gap: 10px !important;
+  }
+
+  .order-list {
+    max-height: calc(100dvh - 160px) !important;
+  }
+
+  #settingsPane .breakdown,
+  #settingsPane .breakdown * {
+    max-width: 100%;
+  }
+
+  #settingsPane textarea,
+  #settingsPane input,
+  #settingsPane select {
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  #particles {
+    display: none !important;
+  }
+}
+
+.local-backups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.local-backup-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.local-backup-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.local-backup-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.local-backup-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 768px) {
+  .local-backup-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .local-backup-actions {
+    justify-content: flex-start;
   }
 }
