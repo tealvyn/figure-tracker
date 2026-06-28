@@ -16,7 +16,7 @@ import {
   renderCollectionHome,
   renderCollectionStatusBar
 } from './collection-view.js';
-import { renderMediaTag, getMediaKind } from './media-storage.js';
+import { renderMediaTag, getMediaKind, getImageUrl } from './media-storage.js';
 
 
 export function applyUiTheme() {
@@ -454,6 +454,9 @@ export function renderDetail() {
 }
 
 export function openForm(options = {}) {
+  if (!appState.editingId) {
+    appState.pendingUploadedMedia = [];
+  }
   const orders = getOrders();
   const dl = document.getElementById('orderSuggestions');
   dl.innerHTML = orders.map(o => `<option value="${H(o.orderNumber)}">${H(o.orderName)}</option>`).join('');
@@ -500,6 +503,7 @@ export function editItem(id) {
   const item = state.items.find(i => i.id === id);
   if (!item) return;
   appState.editingId = id;
+  appState.pendingUploadedMedia = [];
   document.getElementById('fName').value = item.name || '';
   document.getElementById('fOrder').value = item.orderNumber || '';
   document.getElementById('fOrderName').value = item.orderName || '';
@@ -514,7 +518,7 @@ export function editItem(id) {
   document.getElementById('fShipMethod').value = item.shipMethod || 'small_packet';
   document.getElementById('fOrderDate').value = item.orderDate || '';
   document.getElementById('fShipDate').value = item.shipDate || '';
-  document.getElementById('fImg').value = (item.imageUrls || [item.imageUrl || '']).filter(Boolean).join(', ');
+  document.getElementById('fImg').value = mediaUrlsOf(item).join(', ');
   document.getElementById('fShopUrl').value = item.shopUrl || '';
   document.getElementById('fPrice').value = item.priceOriginal || '';
   document.getElementById('fCurrency').value = item.currency || 'JPY';
@@ -535,11 +539,25 @@ export function deleteItem(id) {
   persist(); render(); toast('Удалено');
 }
 
+function mergeMediaByUrl(...lists) {
+  const map = new Map();
+  for (const list of lists) {
+    for (const media of list || []) {
+      const url = getImageUrl(media);
+      if (url && !map.has(url)) map.set(url, media);
+    }
+  }
+  return [...map.values()];
+}
+
 export function saveItem() {
   const name = document.getElementById('fName').value.trim();
   const orderNumber = document.getElementById('fOrder').value.trim();
   if (!name) { alert('Укажи название фигурки'); return; }
   if (!orderNumber) { alert('Укажи номер заказа'); return; }
+  const existingItem = appState.editingId ? state.items.find(i => i.id === appState.editingId) : null;
+  const imageUrls = document.getElementById('fImg').value.split(',').map(s => s.trim()).filter(Boolean);
+  const uploadedMedia = appState.pendingUploadedMedia || [];
   const item = {
     id: appState.editingId || crypto.randomUUID(),
     name, orderNumber,
@@ -553,8 +571,9 @@ export function saveItem() {
     shipMethod: document.getElementById('fShipMethod').value,
     orderDate: document.getElementById('fOrderDate').value,
     shipDate: document.getElementById('fShipDate').value,
-    imageUrls: document.getElementById('fImg').value.split(',').map(s => s.trim()).filter(Boolean),
-    imageUrl: document.getElementById('fImg').value.split(',').map(s => s.trim()).filter(Boolean)[0] || '',
+    imageUrls,
+    imageUrl: imageUrls[0] || '',
+    media: mergeMediaByUrl(existingItem?.media || [], uploadedMedia),
     shopUrl: document.getElementById('fShopUrl').value.trim(),
     priceOriginal: parseFloat(document.getElementById('fPrice').value) || 0,
     currency: document.getElementById('fCurrency').value,
@@ -563,15 +582,16 @@ export function saveItem() {
     status: document.getElementById('fStatus').value,
     tags: document.getElementById('fTags').value.split(',').map(t => t.trim()).filter(Boolean),
     rateAtSave: state.rates[document.getElementById('fCurrency').value] ?? 1,
-    rateAtSaveDate: appState.editingId ? (state.items.find(i => i.id === appState.editingId)?.rateAtSaveDate || new Date().toLocaleDateString('ru')) : new Date().toLocaleDateString('ru'),
-    createdAt: appState.editingId ? (state.items.find(i => i.id === appState.editingId)?.createdAt || Date.now()) : Date.now(),
-    hidden: appState.editingId ? (state.items.find(i => i.id === appState.editingId)?.hidden || false) : false
+    rateAtSaveDate: appState.editingId ? (existingItem?.rateAtSaveDate || new Date().toLocaleDateString('ru')) : new Date().toLocaleDateString('ru'),
+    createdAt: appState.editingId ? (existingItem?.createdAt || Date.now()) : Date.now(),
+    hidden: appState.editingId ? (existingItem?.hidden || false) : false
   };
   const wasEditing = Boolean(appState.editingId);
   if (item.tracking && item.status !== 'Получено' && item.status !== 'В пути') { item.status = 'В пути'; }
   if (appState.editingId) { const idx = state.items.findIndex(i => i.id === appState.editingId); state.items[idx] = item; }
   else state.items.push(item);
   appState.selectedOrder = orderNumber;
+  appState.pendingUploadedMedia = [];
   if (!wasEditing) clearItemDraft();
   closeForm(); persist(); render(); toast(wasEditing ? 'Сохранено' : 'Фигурка добавлена!');
 }
@@ -946,9 +966,16 @@ export function moveWishToCollection(id) {
 }
 
 function mediaUrlsOf(item) {
-  return item?.imageUrls?.length
-    ? item.imageUrls
-    : (item?.imageUrl ? [item.imageUrl] : []);
+  const urls = [];
+  const add = value => {
+    const url = getImageUrl(value);
+    if (url && !urls.includes(url)) urls.push(url);
+  };
+  (item?.imageUrls || []).forEach(add);
+  add(item?.imageUrl);
+  add(item?.img);
+  (item?.media || []).forEach(add);
+  return urls;
 }
 
 function renderClickableMedia(url, className = '', alt = '', lightboxContext = 'gallery') {
@@ -1070,7 +1097,7 @@ export function openModal(id) {
   ${(item.rateAtSave && item.currency !== 'EUR') ? `<div class="modal-row"><span class="modal-label">Курс при добавлении</span><span>€${item.rateAtSave.toFixed(item.currency === 'JPY' ? 5 : 4)} за 1 ${item.currency} <span style="color:var(--muted)">(${item.rateAtSaveDate || '—'})</span></span></div><div class="modal-row"><span class="modal-label">Курс сейчас</span><span>€${(state.rates[item.currency] || 1).toFixed(item.currency === 'JPY' ? 5 : 4)} за 1 ${item.currency} ${(() => { const old = item.rateAtSave || 1; const now = state.rates[item.currency] || 1; const diff = ((now - old) / old * 100).toFixed(1); const color = now > old ? 'var(--green)' : 'var(--red)'; const arrow = now > old ? '↑' : '↓'; return now === old ? '<span style="color:var(--muted)">без изменений</span>' : `<span style="color:${color}">${arrow} ${Math.abs(diff)}%</span>`; })()}</span></div>` : ''}
   <div class="modal-row"><span class="modal-label">Статус</span><span class="badge ${badgeClass(item.status)}">${H(item.status || '—')}</span></div>`;
 
-  const imgs = item.imageUrls?.length ? item.imageUrls : (item.imageUrl ? [item.imageUrl] : []);
+  const imgs = mediaUrlsOf(item);
   window.currentModalImages = imgs;
   let imgIdx = 0; const modalImg = document.getElementById('modalImg');
   function updateModalImg() {
@@ -1563,13 +1590,6 @@ export function initParticles() {
   resize();
   requestAnimationFrame(draw);
 }
-
-
-
-
-
-
-
 
 
 

@@ -26,6 +26,43 @@ function notifyProgress(options, message) {
   if (typeof options?.onProgress === 'function') options.onProgress(message);
 }
 
+function getFileMetadata(file, mediaType = '') {
+  return {
+    mediaType: clean(mediaType),
+    name: clean(file?.name),
+    mimeType: clean(file?.type),
+    size: Number(file?.size || 0),
+    originalName: clean(file?.name)
+  };
+}
+
+function limitText(value, max = 180) {
+  const text = clean(value);
+  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
+export function buildTelegramCaption(file, mediaType, extra = {}) {
+  const metadata = {
+    app: 'FigureTracker',
+    mediaType: clean(mediaType),
+    name: limitText(file?.name),
+    mimeType: clean(file?.type),
+    size: Number(file?.size || 0),
+    uploadedAt: nowIso(),
+    extra: extra && typeof extra === 'object' ? extra : {}
+  };
+  let caption = JSON.stringify(metadata);
+  if (caption.length <= 950) return caption;
+
+  metadata.extra = { truncated: true };
+  metadata.name = limitText(file?.name, 100);
+  caption = JSON.stringify(metadata);
+  if (caption.length <= 950) return caption;
+
+  metadata.name = limitText(file?.name, 40);
+  return JSON.stringify(metadata);
+}
+
 export function getUploadMediaType(file) {
   const type = clean(file?.type).toLowerCase();
   if (STATIC_IMAGE_TYPES.has(type)) return 'photo';
@@ -103,7 +140,11 @@ export function createExternalImage(url) {
     thumbUrl: '',
     mediaType: '',
     createdAt: nowIso(),
-    name: ''
+    name: '',
+    mimeType: '',
+    size: 0,
+    originalName: '',
+    caption: ''
   };
 }
 
@@ -115,7 +156,11 @@ export function createTelegramImage(data = {}) {
     thumbUrl: clean(data.thumbUrl),
     mediaType: clean(data.mediaType),
     createdAt: data.createdAt || nowIso(),
-    name: clean(data.name)
+    name: clean(data.name),
+    mimeType: clean(data.mimeType),
+    size: Number(data.size || 0),
+    originalName: clean(data.originalName || data.name),
+    caption: clean(data.caption)
   };
 }
 
@@ -127,7 +172,11 @@ export function createDriveImage(data = {}) {
     thumbUrl: clean(data.thumbUrl),
     mediaType: clean(data.mediaType),
     createdAt: data.createdAt || nowIso(),
-    name: clean(data.name)
+    name: clean(data.name),
+    mimeType: clean(data.mimeType),
+    size: Number(data.size || 0),
+    originalName: clean(data.originalName || data.name),
+    caption: clean(data.caption)
   };
 }
 
@@ -144,7 +193,11 @@ export function normalizeImage(image) {
     thumbUrl: clean(image.thumbUrl),
     mediaType: clean(image.mediaType),
     createdAt: image.createdAt || nowIso(),
-    name: clean(image.name)
+    name: clean(image.name),
+    mimeType: clean(image.mimeType),
+    size: Number(image.size || 0),
+    originalName: clean(image.originalName || image.name),
+    caption: clean(image.caption)
   };
 }
 
@@ -164,9 +217,11 @@ export async function uploadImageToTelegram(file, settings = {}, options = {}) {
   }
 
   notifyProgress(options, uploadConfig.progress);
+  const caption = buildTelegramCaption(file, mediaType, options?.captionExtra || {});
   const formData = new FormData();
   formData.append('chat_id', tgChatId);
   formData.append(uploadConfig.field, file);
+  formData.append('caption', caption);
 
   const sendRes = await fetch(`${TELEGRAM_API_BASE}/bot${tgBotToken}/${uploadConfig.endpoint}`, {
     method: 'POST',
@@ -192,7 +247,12 @@ export async function uploadImageToTelegram(file, settings = {}, options = {}) {
 
   // TODO: For public deployment, Telegram token must not be exposed in client-side URLs.
   const url = `${TELEGRAM_API_BASE}/file/bot${tgBotToken}/${filePath}`;
-  return createTelegramImage({ url, fileId, name: file.name, mediaType });
+  return createTelegramImage({
+    url,
+    fileId,
+    ...getFileMetadata(file, mediaType),
+    caption
+  });
 }
 
 export async function uploadImageToDrive(file, settings = {}, options = {}) {
@@ -226,8 +286,7 @@ export async function uploadImageToDrive(file, settings = {}, options = {}) {
   return createDriveImage({
     url,
     fileId: result.fileId || result.id || '',
-    mediaType,
-    name: file.name
+    ...getFileMetadata(file, mediaType)
   });
 }
 
@@ -260,6 +319,29 @@ export async function uploadImage(file, settings = {}, options = {}) {
   }
 
   throw new Error('Сначала укажите настройки Telegram или ссылку на Google Script в Настройках');
+}
+
+export async function uploadMediaBatch(filesInput, settings = {}, options = {}) {
+  const files = Array.from(filesInput || []).filter(Boolean);
+  if (!files.length) return [];
+
+  const uploaded = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    const prefix = `${index + 1}/${files.length}`;
+    const media = await uploadImage(file, settings, {
+      ...options,
+      onProgress(message) {
+        notifyProgress(options, `${prefix}: ${message}`);
+      }
+    });
+    uploaded.push(media);
+    if (typeof options?.onFileUploaded === 'function') {
+      options.onFileUploaded(media, index, files.length);
+    }
+  }
+
+  return uploaded;
 }
 
 export function isVideoUrl(url = '') {

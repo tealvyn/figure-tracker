@@ -5,7 +5,7 @@ import * as API from './api.js';
 import { applyI18n, initLanguageControls } from './i18n.js';
 import { bindStaticControls } from './events.js';
 import { bindImportFileInput } from './data-portability.js';
-import { getImageUrl, uploadImage } from './media-storage.js';
+import { getImageUrl, uploadMediaBatch } from './media-storage.js';
 
 // Keep inline handlers from index.html working.
 Object.assign(window, UI);
@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadState();
   UI.applyUiDensity();
   bindStaticControls();
+  bindFigureMediaUpload();
   bindImportFileInput(document.getElementById('importFile'), {
     state,
     appState,
@@ -48,14 +49,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function appendImageUrl(existingValue, url) {
   const existingLinks = (existingValue || '').trim();
+  if (!url) return existingLinks;
   if (!existingLinks) return url;
   return existingLinks.endsWith(',') ? `${existingLinks} ${url}` : `${existingLinks}, ${url}`;
 }
 
 // Media upload binding: network/storage logic lives in media-storage.js.
-document.getElementById('fImgFile')?.addEventListener('change', async event => {
-  const file = event.target.files?.[0];
-  if (!file) return;
+async function handleFigureMediaUpload(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
 
   const imgInput = document.getElementById('fImg');
   if (!imgInput) {
@@ -65,33 +67,51 @@ document.getElementById('fImgFile')?.addEventListener('change', async event => {
 
   const originalValue = imgInput.value;
   const originalPlaceholder = imgInput.placeholder;
+  let currentValue = originalValue;
+  let uploadedCount = 0;
 
   try {
     imgInput.value = state.settings?.tgBotToken && state.settings?.tgChatId
-      ? 'Отправка файла в Telegram...'
-      : 'Добавление файла на Google Диск...';
+      ? 'Отправка файлов в Telegram...'
+      : 'Добавление файлов на Google Диск...';
     imgInput.disabled = true;
 
-    const media = await uploadImage(file, state.settings, {
+    const mediaList = await uploadMediaBatch(files, state.settings, {
       onProgress(message) {
         imgInput.value = message;
+      },
+      onFileUploaded(media, index, total) {
+        const finalImgUrl = getImageUrl(media);
+        currentValue = appendImageUrl(currentValue, finalImgUrl);
+        imgInput.value = currentValue;
+        appState.pendingUploadedMedia = appState.pendingUploadedMedia || [];
+        appState.pendingUploadedMedia.push(media);
+        uploadedCount = index + 1;
+        UI.toast(`${uploadedCount}/${total}: файл добавлен`);
       }
     });
 
-    const finalImgUrl = getImageUrl(media);
-    imgInput.value = appendImageUrl(originalValue, finalImgUrl);
+    imgInput.value = currentValue;
     imgInput.dispatchEvent(new Event('input', { bubbles: true }));
     imgInput.dispatchEvent(new Event('change', { bubbles: true }));
-    UI.toast(media.provider === 'telegram' ? 'Файл добавлен в Telegram!' : 'Файл добавлен в галерею!');
+    UI.toast(mediaList.length > 1 ? 'Файлы добавлены в галерею!' : 'Файл добавлен в галерею!');
   } catch (error) {
-    imgInput.value = originalValue;
+    imgInput.value = uploadedCount > 0 ? currentValue : originalValue;
     alert('Ошибка загрузки файла: ' + (error?.message || 'Не удалось загрузить файл'));
   } finally {
     imgInput.placeholder = originalPlaceholder;
     imgInput.disabled = false;
     event.target.value = '';
   }
-});
+}
+
+function bindFigureMediaUpload() {
+  const input = document.getElementById('fImgFile');
+  if (!input || input.dataset.mediaUploadBound === '1') return;
+  input.dataset.mediaUploadBound = '1';
+  input.multiple = true;
+  input.addEventListener('change', handleFigureMediaUpload);
+}
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
