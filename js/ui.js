@@ -2,15 +2,54 @@
 import { state, appState, persist, toEur } from './state.js';
 import { H, eur, calcAmiAmiShipping, calcOrder, SCALE_WEIGHTS } from './utils.js';
 import * as API from './api.js';
+import { applyI18n, t } from './i18n.js';
+import { downloadJsonBackup } from './data-portability.js';
+import { grabFromClipboard } from './clipboard-import.js';
+import { toast as notifyToast } from './notifications.js';
+import { getBadgeClass, normalizeStatus } from './status.js';
+import * as WishlistView from './wishlist-view.js';
+import {
+  getCollectionTotals,
+  getItemTotalEur,
+  getStatusCounts,
+  releaseSortValue,
+  renderCollectionHome,
+  renderCollectionStatusBar
+} from './collection-view.js';
+import { renderMediaTag, getMediaKind } from './media-storage.js';
 
-export function toast(msg) {
-  const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
-  document.body.appendChild(el); setTimeout(() => el.remove(), 2200);
+
+export function applyUiTheme() {
+  const theme = state.settings?.theme === 'clean' ? 'clean' : 'cyberpunk';
+  document.body.dataset.theme = theme;
+  const toggle = document.getElementById('themeToggle');
+  if (toggle) {
+    toggle.textContent = theme === 'clean' ? 'CLEAN' : 'CYBER';
+    toggle.classList.toggle('is-clean', theme === 'clean');
+  }
+}
+
+export function applyUiDensity() {
+  const density = state.settings?.density === 'comfortable' ? 'comfortable' : 'compact';
+  document.body.dataset.density = density;
+  applyUiTheme();
+}
+
+export function toggleTheme() {
+  state.settings = state.settings || {};
+  state.settings.theme = state.settings.theme === 'clean' ? 'cyberpunk' : 'clean';
+  const select = document.getElementById('sTheme');
+  if (select) select.value = state.settings.theme;
+  applyUiTheme();
+  persist();
+}
+export function toast(message, options = {}) {
+  return notifyToast(message, options);
 }
 
 export function showRatesBadge() {
   const badge = document.getElementById('ratesBadge');
-  if(!badge) return;
+  if (!badge) return;
   const { USD, JPY } = state.rates;
   const age = Date.now() - (state.ratesAt || 0);
   const mins = Math.floor(age / 60000);
@@ -212,7 +251,7 @@ export function getOrders() {
     if (sort === 'price-desc') return calcOrder(b).total - calcOrder(a).total;
     if (sort === 'price-asc') return calcOrder(a).total - calcOrder(b).total;
     if (sort === 'name') return a.orderName.localeCompare(b.orderName);
-  
+
     if (sort === 'release-asc' || sort === 'release-desc') {
       const parseRelease = order => {
         const dates = order.items.map(i => i.releaseDate).filter(Boolean);
@@ -221,7 +260,7 @@ export function getOrders() {
           if (!d) return 999999;
           const ymd = d.match(/(\d{4})[\/\-](\d{1,2})/);
           if (ymd) return parseInt(ymd[1]) * 100 + parseInt(ymd[2]);
-          const MONTHS = [['jan', 'янв'],['feb', 'фев'],['mar', 'мар'],['apr', 'апр'],['may', 'май', 'мая'],['jun', 'июн'],['jul', 'июл'],['aug', 'авг'],['sep', 'сен'],['oct', 'окт'],['nov', 'ноя', 'ноябр'],['dec', 'дек']];
+          const MONTHS = [['jan', 'янв'], ['feb', 'фев'], ['mar', 'мар'], ['apr', 'апр'], ['may', 'май', 'мая'], ['jun', 'июн'], ['jul', 'июл'], ['aug', 'авг'], ['sep', 'сен'], ['oct', 'окт'], ['nov', 'ноя', 'ноябр'], ['dec', 'дек']];
           const lower = d.toLowerCase();
           const year = lower.match(/\d{4}/)?.[0] ?? '9999';
           const mIdx = MONTHS.findIndex(variants => variants.some(v => lower.includes(v)));
@@ -245,11 +284,12 @@ export function orderStatus(order) {
   return 'Не оплачено';
 }
 
+export function orderStatusKey(order) {
+  return normalizeStatus(orderStatus(order));
+}
+
 export function badgeClass(status) {
-  if (status === 'Полностью оплачено' || status === 'В пути') return 'badge-paid';
-  if (status === 'Депозит оплачен') return 'badge-deposit';
-  if (status === 'Получено') return 'badge-received';
-  return 'badge-unpaid';
+  return getBadgeClass(status);
 }
 
 export function getFiltered() {
@@ -273,7 +313,7 @@ export function getFiltered() {
 export function renderSidebar() {
   const orders = getFiltered();
   const list = document.getElementById('orderList');
-  if(!list) return;
+  if (!list) return;
   if (!orders.length) { list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px;">Посылок нет.</div>'; return; }
   list.innerHTML = orders.map(order => {
     const isHidden = order.items.every(i => i.hidden);
@@ -312,95 +352,27 @@ export function backToOrders() {
 }
 
 export function updateWishlistBadge() {
-  const wishTab = document.querySelector('.nav-tab[data-tab="wishlist"]');
-  if (!wishTab) return;
-  const cnt = (state.wishlist || []).length;
-  wishTab.innerHTML = `⭐ Вишлист${cnt ? ` <span class="tab-badge">${cnt}</span>` : ''}`;
+  return WishlistView.updateWishlistBadge();
 }
 
 export function renderDetail() {
   const pane = document.getElementById('detailPane');
-  if(!pane) return;
+  if (!pane) return;
   syncMobileCollectionView();
   if (!appState.selectedOrder) {
     const orders = getFiltered();
-    const totals = { total: 0, paid: 0, tax: 0 };
-    getOrders().forEach(o => {
-      const c = calcOrder(o);
-      totals.total += Number(c.total);
-      totals.tax += Number(c.alv) + Number(c.customs);
-      const taxPerItem = (Number(c.alv) + Number(c.customs)) / o.items.length;
-      o.items.forEach(i => {
-        const itemEur = toEur(i.priceOriginal || 0, i.currency || 'EUR');
-        const shipping = Number(i.shippingEur) || 0;
-        const deposit = Number(i.deposit) || 0;
-        const itemTotal = itemEur + shipping;
-
-        if (i.status === 'Получено') { totals.paid += itemTotal + taxPerItem; } 
-        else if (i.status === 'В пути' || i.status === 'Полностью оплачено') { totals.paid += itemTotal; } 
-        else if (i.status === 'Депозит оплачен') { totals.paid += deposit; }
-      });
-    });
-    totals.remaining = totals.total - totals.paid;
-
     const allOrders = getOrders();
-    const statusCounts = { 'Не оплачено': 0, 'Депозит оплачен': 0, 'Полностью оплачено': 0, 'В пути': 0, 'Получено': 0 };
-    for (const order of allOrders) {
-      const s = orderStatus(order);
-      if (statusCounts[s] !== undefined) statusCounts[s]++;
-      else statusCounts[s] = 1;
-    }
-
-    const statusBar = `
-  <div style="display:flex;gap:8px;flex-wrap:wrap;padding:0 0 16px 0">
-  <span class="badge" style="cursor:pointer;background:var(--line);" onclick="appState.filterStatus=null;render()">Все: ${getOrders().length}</span>
-    <span class="badge badge-unpaid" style="cursor:pointer;" onclick="appState.filterStatus='Не оплачено';render()">⏳ Не оплачено: ${statusCounts['Не оплачено']}</span>
-    <span class="badge badge-deposit" style="cursor:pointer;" onclick="appState.filterStatus='Депозит оплачен';render()">💳 Депозит: ${statusCounts['Депозит оплачен']}</span>
-    <span class="badge badge-paid" style="cursor:pointer;" onclick="appState.filterStatus='Полностью оплачено';render()">✅ Оплачено: ${statusCounts['Полностью оплачено']}</span>
-  <span class="badge badge-paid" style="cursor:pointer;" onclick="appState.filterStatus='В пути';render()">🚚 В пути: ${statusCounts['В пути']}</span>
-<span class="badge badge-received" style="cursor:pointer;" onclick="appState.filterStatus='Получено';render()">📦 Получено: ${statusCounts['Получено']}</span>
-    </div>`;
-
-    pane.innerHTML = `
-  <div class="stats-bar">
-    <div class="stat"><div class="stat-label">Заказов</div><div class="stat-val">${orders.length}</div><div class="stat-sub">${state.items.length} фигурок</div></div>
-    <div class="stat"><div class="stat-label">Итого</div><div class="stat-val">${eur(totals.total)}</div></div>
-    <div class="stat"><div class="stat-label">Уплачено</div><div class="stat-val">${eur(totals.paid)}</div></div>
-    <div class="stat"><div class="stat-label">Остаток</div><div class="stat-val" style="color:var(--yellow)">${eur(totals.remaining)}</div></div>
-  <div class="chart-card" style="grid-column:1/-1;">
-  <div class="chart-title">📊 Полочка vs Долги</div>
-  <div id="shelfChart"></div>
-</div>
-    </div>
-    ${statusBar}
-
-  <div class="orders-grid fade-in" style="animation-delay:120ms">
-    ${orders.length ? orders.map(order => {
-      const c = calcOrder(order);
-      const status = orderStatus(order);
-      const thumbs = order.items.slice(0, 4).map(i =>
-        i.imageUrl
-          ? `<img class="order-grid-thumb" src="${H(i.imageUrl)}" alt="" loading="lazy" onerror="this.style.opacity='.1'">`
-          : `<div class="order-grid-thumb" style="display:flex;align-items:center;justify-content:center;font-size:20px;">📦</div>`
-      ).join('');
-      const extra = order.items.length > 4 ? `<div class="order-grid-thumb order-thumb-more">+${order.items.length - 4}</div>` : '';
-      const orderDate = order.items[0]?.orderDate ? new Date(order.items[0].orderDate).toLocaleDateString('ru') : '—';
-      const shipDate = order.items[0]?.shipDate ? new Date(order.items[0].shipDate).toLocaleDateString('ru') : '—';
-      return `<div class="order-grid-card fade-in" style="animation-delay:160ms" onclick="appState.selectedOrder='${H(order.orderNumber)}';render();">
-        <div class="order-grid-thumbs">${thumbs}${extra}</div>
-        <div class="order-grid-body">
-          <div class="order-grid-name">${H(order.orderName)}</div>
-          <div class="order-grid-meta">#${H(order.orderNumber)} · ${H(order.store || '—')}</div>
-          <div class="order-grid-meta">📅 Заказан: ${orderDate}</div>
-          <div class="order-grid-meta">🚚 Отправлен: ${shipDate}</div>
-          <div class="order-grid-footer">
-            <span class="badge ${badgeClass(status)}">${H(status)}</span>
-            <span class="order-total">${eur(c.total)}</span>
-          </div>
-        </div>
-      </div>`;
-    }).join('') : '<div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1;">Нет заказов</div>'}
-  </div>`;
+    const totals = getCollectionTotals(allOrders);
+    const statusCounts = getStatusCounts(allOrders);
+    const statusBar = renderCollectionStatusBar(statusCounts, allOrders.length);
+    pane.innerHTML = renderCollectionHome({
+      orders,
+      allOrders,
+      totals,
+      statusCounts,
+      statusBar,
+      itemCount: state.items.length
+    });
     renderShelfChart();
     return;
   }
@@ -410,7 +382,21 @@ export function renderDetail() {
   const c = calcOrder(order); const status = orderStatus(order);
   const figures = order.items.map(item => {
     const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
-    return `<div class="figure-card animate-in" style="animation-delay:${order.items.indexOf(item) * 40}ms" onclick="openModal('${H(item.id)}')" >${item.imageUrl ? `<img class="figure-img" src="${H(item.imageUrl)}" alt="${H(item.name)}" onerror="this.style.opacity='.1'">` : `<div class="figure-img" style="display:flex;align-items:center;justify-content:center;font-size:36px;">📦</div>`}<div class="figure-body"><div class="figure-name">${H(item.name)}</div><div class="figure-meta">🏭 ${H(item.manufacturer || '—')}</div><div class="figure-meta">📅 Выход: ${H(item.releaseDate || '—')}</div><div class="figure-meta">💱 ${H(String(item.priceOriginal ?? '—'))} ${H(item.currency || '')}${item.currency && item.currency !== 'EUR' ? ` → <span style="color:var(--accent)">${eur(priceEur)}</span>` : ''}</div>${item.shopUrl ? `<a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--accent);text-decoration:none;margin-top:6px;margin-bottom:2px;">🔗 Открыть в магазине</a>` : ''}${item.tags?.length ? `<div class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</div>` : ''} <div class="figure-card-actions"><button class="btn btn-sm" onclick="editItem('${H(item.id)}')">Редактировать</button><button class="btn btn-sm btn-danger" onclick="deleteItem('${H(item.id)}')">Удалить</button></div></div></div>`;
+    return `<div class="figure-card animate-in" style="animation-delay:${order.items.indexOf(item) * 40}ms" onclick="openModal('${H(item.id)}')">
+  ${renderMediaTag(item.imageUrl || item.img || item.videoUrl, 'figure-img', item.name)}
+  <div class="figure-body">
+    <div class="figure-name">${H(item.name)}</div>
+    <div class="figure-meta">🏭 ${H(item.manufacturer || '—')}</div>
+    <div class="figure-meta">📅 Выход: ${H(item.releaseDate || '—')}</div>
+    <div class="figure-meta">💱 ${H(String(item.priceOriginal ?? '—'))} ${H(item.currency || '')}${item.currency && item.currency !== 'EUR' ? ` → <span style="color:var(--accent)">${eur(priceEur)}</span>` : ''}</div>
+    ${item.shopUrl ? `<a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--accent);text-decoration:none;margin-top:6px;margin-bottom:2px;">🔗 Открыть в магазине</a>` : ''}
+    ${item.tags?.length ? `<div class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</div>` : ''}
+    <div class="figure-card-actions">
+      <button class="btn btn-sm" onclick="event.stopPropagation(); editItem('${H(item.id)}')">Редактировать</button>
+      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteItem('${H(item.id)}')">Удалить</button>
+    </div>
+  </div>
+</div>`;
   }).join('');
   const allReceived = order.items.every(i => i.status === 'Получено');
   const isHidden = order.items.every(i => i.hidden);
@@ -476,10 +462,10 @@ export function openForm(options = {}) {
   if (!options.skipDraft) maybeRestoreItemDraft();
 }
 
-export function closeForm() { 
-  document.getElementById('formOverlay').style.display = 'none'; 
-  appState.editingId = null; 
-  clearForm(); 
+export function closeForm() {
+  document.getElementById('formOverlay').style.display = 'none';
+  appState.editingId = null;
+  clearForm();
 }
 
 export function clearForm() {
@@ -488,7 +474,8 @@ export function clearForm() {
   document.getElementById('fRegion').value = 'Япония';
   document.getElementById('fStatus').value = 'Не оплачено';
   document.getElementById('eurPreview').textContent = '';
-  document.getElementById('formTitle').textContent = 'Добавить фигурку';
+  document.getElementById('formTitle').dataset.i18n = 'form.addFigure';
+  document.getElementById('formTitle').textContent = t('form.addFigure');
   document.getElementById('fTracking').value = '';
   document.getElementById('fDateMonth').value = '';
   document.getElementById('fShipMethod').value = 'small_packet';
@@ -535,7 +522,8 @@ export function editItem(id) {
   document.getElementById('fDeposit').value = item.deposit || '';
   document.getElementById('fStatus').value = item.status || 'Не оплачено';
   document.getElementById('fTags').value = (item.tags || []).join(', ');
-  document.getElementById('formTitle').textContent = 'Редактировать фигурку';
+  document.getElementById('formTitle').dataset.i18n = 'form.editFigure';
+  document.getElementById('formTitle').textContent = t('form.editFigure');
   updateEurPreview(); openForm();
 }
 
@@ -594,6 +582,9 @@ export function loadSettings() {
   document.getElementById('sCurrency').value = s.currency || 'JPY';
   document.getElementById('sStore').value = s.store || '';
   document.getElementById('sShipMethod').value = s.shipMethod || 'small_packet';
+  if (document.getElementById('sDensity')) document.getElementById('sDensity').value = s.density || 'compact';
+  if (document.getElementById('sTheme')) document.getElementById('sTheme').value = s.theme || 'cyberpunk';
+  applyUiDensity();
   document.getElementById('sScriptUrl').value = s.scriptUrl || '';
   document.getElementById('sTgBotToken').value = s.tgBotToken || '';
   document.getElementById('sTgChatId').value = s.tgChatId || '';
@@ -601,6 +592,7 @@ export function loadSettings() {
   const orders = getOrders();
   const received = state.items.filter(i => i.status === 'Получено').length;
   document.getElementById('settingsStats').innerHTML = `${state.items.length} фигурок · ${orders.length} заказов · ${received} получено · ${state.wishlist?.length || 0} в вишлисте`;
+  renderLocalBackups();
 }
 
 export function saveSettings() {
@@ -609,10 +601,13 @@ export function saveSettings() {
     currency: document.getElementById('sCurrency').value,
     store: document.getElementById('sStore').value,
     shipMethod: document.getElementById('sShipMethod').value,
+    density: document.getElementById('sDensity')?.value || state.settings?.density || 'compact',
+    theme: document.getElementById('sTheme')?.value || state.settings?.theme || 'cyberpunk',
     scriptUrl: document.getElementById('sScriptUrl').value.trim(),
     tgBotToken: document.getElementById('sTgBotToken').value.trim(),
     tgChatId: document.getElementById('sTgChatId').value.trim()
   };
+  applyUiDensity();
   persist();
 }
 
@@ -626,11 +621,8 @@ export function clearAllData() {
 }
 
 export function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `figure-tracker-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click(); URL.revokeObjectURL(a.href); toast('📤 Бекап сохранён');
+  downloadJsonBackup(state);
+  toast('\uD83D\uDCE4 \u0411\u0435\u043A\u0430\u043F \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D');
 }
 
 export function toggleOrderHidden(orderNumber) {
@@ -687,7 +679,7 @@ export function renderShelfChart() {
 
   el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
-      ${[['📦 Получено', shelfValue, '#a78bfa'],['🚚 В пути', inTransitValue, '#4ade80'],['✅ Оплачено', prepaidValue, '#67e8f9'],['💳 Депозит', depositValue, '#fbbf24'],['⏳ Не оплачено', unpaidValue, '#f87171']].map(([label, val, color]) => `
+      ${[['📦 Получено', shelfValue, '#a78bfa'], ['🚚 В пути', inTransitValue, '#4ade80'], ['✅ Оплачено', prepaidValue, '#67e8f9'], ['💳 Депозит', depositValue, '#fbbf24'], ['⏳ Не оплачено', unpaidValue, '#f87171']].map(([label, val, color]) => `
         <div style="display:flex;justify-content:space-between;">
           <span style="color:${color}">${label}</span>
           <span style="color:${color}">€${val.toFixed(2)} · ${pct(val)}%</span>
@@ -707,6 +699,33 @@ export function renderShelfChart() {
 }
 
 export function renderAnalytics() {
+  const orders = getOrders();
+  const totals = getCollectionTotals(orders);
+  const received = state.items.filter(i => i.status === 'Получено');
+  const inTransit = state.items.filter(i => i.status === 'В пути');
+  const unpaid = state.items.filter(i => i.status === 'Не оплачено' || i.status === 'Депозит оплачен');
+  const topStore = Object.entries(state.items.reduce((acc, i) => {
+    const key = i.store || '—';
+    acc[key] = (acc[key] || 0) + getItemTotalEur(i);
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1])[0];
+
+  const summaryEl = document.getElementById('analyticsSummary');
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <div class="analytics-kpi"><span>Всего</span><strong>${eur(totals.total)}</strong><small>${orders.length} заказов · ${state.items.length} фигурок</small></div>
+      <div class="analytics-kpi"><span>На полке</span><strong>${received.length}</strong><small>${eur(received.reduce((s, i) => s + getItemTotalEur(i), 0))}</small></div>
+      <div class="analytics-kpi"><span>В пути</span><strong>${inTransit.length}</strong><small>${inTransit.length ? 'ждёт получения' : 'ничего не едет'}</small></div>
+      <div class="analytics-kpi"><span>Осталось</span><strong>${eur(totals.remaining)}</strong><small>${unpaid.length} позиций требуют денег</small></div>
+      <div class="analytics-kpi"><span>Топ магазин</span><strong>${H(topStore?.[0] || '—')}</strong><small>${topStore ? eur(topStore[1]) : 'нет данных'}</small></div>`;
+  }
+
+  const forecastEl = document.getElementById('analyticsForecast');
+  if (forecastEl) {
+    const upcoming = state.items.filter(i => i.status !== 'Получено' && i.releaseDate).sort((a, b) => releaseSortValue(a) - releaseSortValue(b)).slice(0, 6);
+    forecastEl.innerHTML = `<div class="analytics-forecast-title">Ближайший план</div>${upcoming.length ? upcoming.map(i => `<button onclick="openModal('${H(i.id)}')"><span>${H(i.releaseDate || '—')}</span><strong>${H(i.name)}</strong><em>${eur(getItemTotalEur(i))}</em></button>`).join('') : '<div class="dashboard-empty">Нет будущих релизов</div>'}`;
+  }
+
   if (typeof Chart === 'undefined') return;
   const storeData = {}; const makerData = {};
   state.items.forEach(i => {
@@ -788,7 +807,7 @@ export function renderGallery() {
   const makerSel = document.getElementById('galleryMaker');
   if (makerSel) {
     const cur = makerSel.value;
-    makerSel.innerHTML = '<option value="">Все производители</option>' + makers.map(m => `<option value="${H(m)}" ${m === cur ? 'selected' : ''}>${H(m)}</option>`).join('');
+    makerSel.innerHTML = `<option value="">${t('gallery.allMakers')}</option>` + makers.map(m => `<option value="${H(m)}" ${m === cur ? 'selected' : ''}>${H(m)}</option>`).join('');
   }
 
   if (q) items = items.filter(i => [i.name, i.manufacturer, i.store, ...(i.tags || [])].join(' ').toLowerCase().includes(q));
@@ -802,19 +821,61 @@ export function renderGallery() {
     return 0;
   });
 
-  const stats = document.getElementById('galleryStats');
-  if (stats) stats.innerHTML = `<div style="font-size:13px;color:var(--muted);margin-bottom:14px;">${items.length} фигурок${makerF ? ` · ${H(makerF)}` : ''}</div>`;
-  const grid = document.getElementById('galleryGrid');
-  if (!items.length) { grid.innerHTML = '<div style="color:var(--muted);text-align:center;padding:60px 0;">Ничего не найдено</div>'; return; }
+ const stats = document.getElementById('galleryStats');
+if (stats) {
+  stats.innerHTML = `<div style="font-size:13px;color:var(--muted);margin-bottom:14px;">${items.length} фигурок${makerF ? ` · ${H(makerF)}` : ''}</div>`;
+}
 
-  grid.innerHTML = items.map((item, idx) => {
-    const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
-    const imgs = item.imageUrls?.length ? item.imageUrls : item.imageUrl ? [item.imageUrl] : [];
-    if (imgs.length === 0) {
-      return `<div class="gallery-card animate-in" style="animation-delay:${idx * 20}ms; position: relative; aspect-ratio: 1;" onclick="openModal('${H(item.id)}')"><div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:40px; opacity:0.3; background:#111;">📦</div><div class="gallery-overlay"><div class="gallery-name">${H(item.name)}</div>${priceEur ? `<div class="gallery-price">€${priceEur.toFixed(2)}</div>` : ''}</div></div>`;
-    }
-    return imgs.map((img, imgIdx) => `<div class="gallery-card animate-in" style="animation-delay:${(idx + imgIdx) * 20}ms; position: relative; align-self: start;" onclick="openModal('${H(item.id)}')"><img class="zoomable" src="${H(img)}" loading="lazy" alt="${H(item.name)}" style="width: 100%; height: auto; display: block;" onerror="this.closest('.gallery-card').style.display='none'" onclick="event.stopPropagation(); openLightbox('${H(img)}', 'gallery')"><div class="gallery-overlay"><div class="gallery-name">${H(item.name)} ${imgs.length > 1 ? `<span style="font-size:11px;opacity:0.7">(${imgIdx + 1}/${imgs.length})</span>` : ''}</div>${priceEur && imgIdx === 0 ? `<div class="gallery-price">€${priceEur.toFixed(2)}</div>` : ''}</div></div>`).join('');
+const grid = document.getElementById('galleryGrid');
+if (!grid) return;
+
+if (!items.length) {
+  grid.innerHTML = '<div style="color:var(--muted);text-align:center;padding:60px 0;">Ничего не найдено</div>';
+  return;
+}
+
+grid.innerHTML = items.map((item, idx) => {
+  const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
+  const imgs = mediaUrlsOf(item);
+
+  if (imgs.length === 0) {
+    return `<div class="gallery-card animate-in" style="animation-delay:${idx * 20}ms; position: relative; aspect-ratio: 1;" onclick="openModal('${H(item.id)}')">
+      <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:40px; opacity:0.3; background:#111;">📦</div>
+      <div class="gallery-overlay">
+        <div class="gallery-name">${H(item.name)}</div>
+        ${priceEur ? `<div class="gallery-price">€${priceEur.toFixed(2)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  return imgs.map((img, imgIdx) => {
+    const kind = getMediaKind(img);
+
+    const mediaHtml = kind === 'animation'
+      ? `<div class="gallery-video-wrap">
+          <video class="gallery-media" data-media-url="${H(img)}" autoplay loop muted playsinline preload="metadata" onclick="event.stopPropagation()">
+            <source src="${H(img)}">
+          </video>
+          <button class="media-open-btn" onclick="event.stopPropagation(); openLightbox('${H(img)}', 'gallery')">⛶</button>
+        </div>`
+      : kind === 'video'
+        ? `<div class="gallery-video-wrap">
+            <video class="gallery-media" data-media-url="${H(img)}" controls preload="metadata" playsinline onclick="event.stopPropagation()">
+              <source src="${H(img)}">
+            </video>
+            <button class="media-open-btn" onclick="event.stopPropagation(); openLightbox('${H(img)}', 'gallery')">⛶</button>
+          </div>`
+        : `<img class="gallery-media zoomable" data-media-url="${H(img)}" src="${H(img)}" loading="lazy" alt="${H(item.name)}" onerror="this.closest('.gallery-card').style.display='none'" onclick="event.stopPropagation(); openLightbox('${H(img)}', 'gallery')">`;
+
+    return `<div class="gallery-card animate-in" style="animation-delay:${(idx + imgIdx) * 20}ms; position: relative; align-self: start;" onclick="openModal('${H(item.id)}')">
+      ${mediaHtml}
+      <div class="gallery-overlay">
+        <div class="gallery-name">${H(item.name)} ${imgs.length > 1 ? `<span style="font-size:11px;opacity:0.7">(${imgIdx + 1}/${imgs.length})</span>` : ''}</div>
+        ${priceEur && imgIdx === 0 ? `<div class="gallery-price">€${priceEur.toFixed(2)}</div>` : ''}
+      </div>
+    </div>`;
   }).join('');
+}).join('');
 }
 
 export function checkReleaseReminders() {
@@ -853,7 +914,7 @@ export function updateBanner(advance = false) {
   if (!active.length) { banner.style.display = 'none'; return; }
   if (advance) appState.bannerIndex = (appState.bannerIndex + 1) % active.length;
   else if (appState.bannerIndex >= active.length) appState.bannerIndex = 0;
-  
+
   const currentNotice = active[appState.bannerIndex];
   const BANNER_THEMES = { unpaid: { bg: 'rgba(248,113,113,0.08)', border: 'rgba(248,113,113,0.2)', color: 'var(--red)' }, upcoming: { bg: 'rgba(251,191,36,0.08)', border: 'rgba(251,191,36,0.2)', color: 'var(--yellow)' }, transit: { bg: 'rgba(74,222,128,0.08)', border: 'rgba(74,222,128,0.2)', color: 'var(--green)' }, stats: { bg: 'rgba(103,232,249,0.08)', border: 'rgba(103,232,249,0.2)', color: 'var(--accent)' }, fact: { bg: 'rgba(138,147,168,0.08)', border: 'rgba(138,147,168,0.2)', color: 'var(--muted)' } };
   const theme = BANNER_THEMES[currentNotice.type] || BANNER_THEMES.fact;
@@ -866,29 +927,11 @@ export function getFactByTime() {
   return facts[Math.floor(Date.now() / 60000) % facts.length];
 }
 
-export function openWishForm() { appState.editingWishId = null; clearWishForm(); document.getElementById('wishFormOverlay').style.display = 'flex'; }
-export function closeWishForm() { document.getElementById('wishFormOverlay').style.display = 'none'; appState.editingWishId = null; }
-export function clearWishForm() {
-  ['wName', 'wStore', 'wMaker', 'wPrice', 'wDate', 'wImg', 'wShopUrl', 'wNotes'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('wCurrency').value = 'JPY'; document.getElementById('wPriority').value = 'mid'; document.getElementById('wishFormTitle').textContent = 'Добавить в вишлист';
-}
-
-export function saveWish() {
-  const name = document.getElementById('wName').value.trim();
-  if (!name) { alert('Укажи название'); return; }
-  const wish = {
-    id: appState.editingWishId || crypto.randomUUID(), name, store: document.getElementById('wStore').value.trim(), manufacturer: document.getElementById('wMaker').value.trim(), priceOriginal: parseFloat(document.getElementById('wPrice').value) || 0, currency: document.getElementById('wCurrency').value, releaseDate: document.getElementById('wDate').value.trim(), imageUrls: document.getElementById('wImg').value.split(',').map(s => s.trim()).filter(Boolean), imageUrl: document.getElementById('wImg').value.split(',').map(s => s.trim()).filter(Boolean)[0] || '', shopUrl: document.getElementById('wShopUrl').value.trim(), notes: document.getElementById('wNotes').value.trim(), priority: document.getElementById('wPriority').value, createdAt: appState.editingWishId ? (state.wishlist?.find(w => w.id === appState.editingWishId)?.createdAt || Date.now()) : Date.now()
-  };
-  if (!state.wishlist) state.wishlist = [];
-  if (appState.editingWishId) { const idx = state.wishlist.findIndex(w => w.id === appState.editingWishId); state.wishlist[idx] = wish; } else state.wishlist.push(wish);
-  closeWishForm(); persist(); renderWishlist(); toast(appState.editingWishId ? 'Сохранено' : 'Добавлено в вишлист!');
-}
-
-export function deleteWish(id) {
-  if (!confirm('Удалить из вишлиста?')) return;
-  createLocalBackup('before-delete-wish', true);
-  state.wishlist = state.wishlist.filter(w => w.id !== id); persist(); renderWishlist(); toast('Удалено');
-}
+export function openWishForm(...args) { return WishlistView.openWishForm(...args); }
+export function closeWishForm(...args) { return WishlistView.closeWishForm(...args); }
+export function clearWishForm(...args) { return WishlistView.clearWishForm(...args); }
+export function saveWish(...args) { return WishlistView.saveWish(...args); }
+export function deleteWish(...args) { return WishlistView.deleteWish(...args); }
 
 export function moveWishToCollection(id) {
   const w = (state.wishlist || []).find(x => x.id === id); if (!w) return;
@@ -899,55 +942,122 @@ export function moveWishToCollection(id) {
   document.getElementById('fPrice').value = w.priceOriginal || ''; document.getElementById('fCurrency').value = w.currency || 'JPY'; document.getElementById('fTags').value = (w.tags || []).join(', ');
   updateEurPreview();
   switchTab('collection');
-  document.getElementById('formTitle').textContent = 'Добавить фигурку'; appState.editingId = null; document.getElementById('formOverlay').style.display = 'flex'; toast('Заполни заказ и сохрани — фигурка перейдёт в коллекцию');
+  document.getElementById('formTitle').dataset.i18n = 'form.addFigure'; document.getElementById('formTitle').textContent = t('form.addFigure'); appState.editingId = null; document.getElementById('formOverlay').style.display = 'flex'; toast('Заполни заказ и сохрани — фигурка перейдёт в коллекцию');
 }
 
-export function editWish(id) {
-  const w = (state.wishlist || []).find(x => x.id === id); if (!w) return;
-  appState.editingWishId = id;
-  document.getElementById('wName').value = w.name || ''; document.getElementById('wStore').value = w.store || ''; document.getElementById('wMaker').value = w.manufacturer || ''; document.getElementById('wPrice').value = w.priceOriginal || ''; document.getElementById('wCurrency').value = w.currency || 'JPY'; document.getElementById('wDate').value = w.releaseDate || ''; document.getElementById('wImg').value = (w.imageUrls || [w.imageUrl || '']).filter(Boolean).join(', '); document.getElementById('wShopUrl').value = w.shopUrl || ''; document.getElementById('wNotes').value = w.notes || ''; document.getElementById('wPriority').value = w.priority || 'mid';
-  document.getElementById('wishFormTitle').textContent = 'Редактировать'; document.getElementById('wishFormOverlay').style.display = 'flex';
+function mediaUrlsOf(item) {
+  return item?.imageUrls?.length
+    ? item.imageUrls
+    : (item?.imageUrl ? [item.imageUrl] : []);
 }
 
-const PRIORITY_LABEL = { 'high': '🔥 Куплю точно', 'mid': '⭐ Хочу', 'low': '💭 Если дёшево' };
-const PRIORITY_COLOR = { 'high': 'var(--red)', 'mid': 'var(--yellow)', 'low': 'var(--muted)' };
+function renderClickableMedia(url, className = '', alt = '', lightboxContext = 'gallery') {
+  if (!url) return '';
 
-export function renderWishlist() {
-  const allWishes = state.wishlist || [];
-  const q = (document.getElementById('wishSearch')?.value || '').trim().toLowerCase();
-  const pf = document.getElementById('wishPriorityFilter')?.value || '';
-  const wishes = allWishes.filter(w => {
-    if (pf && w.priority !== pf) return false;
-    if (!q) return true;
-    return [w.name, w.store, w.manufacturer, w.releaseDate].join(' ').toLowerCase().includes(q);
-  });
-  updateWishlistBadge();
-  const grid = document.getElementById('wishGrid');
-  if (!grid) return;
-  if (!wishes.length) { grid.innerHTML = '<div style="color:var(--muted);padding:40px 0;grid-column:1/-1;text-align:center;">Вишлист пуст — добавь первую мечту! ⭐</div>'; return; }
-  grid.innerHTML = wishes.map(w => {
-    const priceEur = toEur(w.priceOriginal || 0, w.currency || 'EUR');
-    return `<div class="wish-card animate-in" style="animation-delay:${wishes.indexOf(w) * 40}ms" onclick="openWishModal('${H(w.id)}')">${w.imageUrl ? `<img class="wish-img" src="${H(w.imageUrl)}" loading="lazy" alt="${H(w.name)}" onerror="this.style.opacity='.1'">` : `<div class="wish-img" style="display:flex;align-items:center;justify-content:center;font-size:48px;">⭐</div>`}<div class="wish-body"><div class="wish-name">${H(w.name)}</div><div class="wish-meta">${H(w.store || '—')}</div><div class="wish-price" style="color:${PRIORITY_COLOR[w.priority]}">${PRIORITY_LABEL[w.priority]}</div>${w.priceOriginal ? `<div class="wish-meta" style="color:var(--accent);margin-top:4px;">~€${priceEur}</div>` : ''}</div></div>`;
-  }).join('');
-}
+  const kind = getMediaKind(url);
 
-export function openWishModal(id) {
-  const w = (state.wishlist || []).find(x => x.id === id); if (!w) return;
-  const priceEur = toEur(w.priceOriginal || 0, w.currency || 'EUR');
-  const imgs = w.imageUrls?.length ? w.imageUrls : (w.imageUrl ? [w.imageUrl] : []);
-  let imgIdx = 0; const modalImg = document.getElementById('modalImg');
-  function updateWishModalImg() {
-    modalImg.src = imgs[imgIdx] || ''; modalImg.style.display = imgs.length ? 'block' : 'none'; modalImg.className = 'modal-img ' + (imgs.length ? 'zoomable' : '');
-    modalImg.onclick = imgs.length ? () => openLightbox(imgs[imgIdx], w.name) : null;
-    document.getElementById('modalImgCounter').textContent = imgs.length > 1 ? `${imgIdx + 1} / ${imgs.length}` : '';
-    document.getElementById('modalImgPrev').style.display = imgs.length > 1 ? 'flex' : 'none'; document.getElementById('modalImgNext').style.display = imgs.length > 1 ? 'flex' : 'none';
+  if (kind === 'animation' || kind === 'video') {
+    return renderMediaTag(url, className, alt);
   }
-  document.getElementById('modalImgPrev').onclick = () => { imgIdx = (imgIdx - 1 + imgs.length) % imgs.length; updateWishModalImg(); };
-  document.getElementById('modalImgNext').onclick = () => { imgIdx = (imgIdx + 1) % imgs.length; updateWishModalImg(); };
-  updateWishModalImg();
-  document.getElementById('modalName').textContent = w.name || '—';
-  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">Приоритет</span><span style="color:${PRIORITY_COLOR[w.priority]}">${PRIORITY_LABEL[w.priority]}</span></div><div class="modal-row"><span class="modal-label">Магазин</span><span>${H(w.store || '—')}</span></div><div class="modal-row"><span class="modal-label">Производитель</span><span>${H(w.manufacturer || '—')}</span></div><div class="modal-row"><span class="modal-label">Дата выхода</span><span>${H(w.releaseDate || '—')}</span></div>${w.priceOriginal ? `<div class="modal-row"><span class="modal-label">Цена</span><span>${w.priceOriginal} ${w.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div>` : ''}${w.notes ? `<div class="modal-row"><span class="modal-label">Заметки</span><span>${H(w.notes)}</span></div>` : ''}${w.shopUrl ? `<div class="modal-row"><span class="modal-label">Страница товара</span><a href="${H(w.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">Открыть в магазине </a></div>` : ''}`;
-  document.getElementById('modalMove').style.display = 'flex'; document.getElementById('modalMove').onclick = () => moveWishToCollection(id); document.getElementById('modalEdit').onclick = () => { closeModal(); editWish(id); }; document.getElementById('modalDelete').onclick = () => { if (confirm('Удалить?')) { closeModal(); deleteWish(id); } }; document.getElementById('modalOverlay').style.display = 'flex';
+
+  return `<img class="${className} zoomable" data-media-url="${H(url)}" src="${H(url)}" loading="lazy" alt="${H(alt || '')}" onerror="this.style.opacity='.1'" onclick="event.stopPropagation();openLightbox('${H(url)}','${H(lightboxContext)}')">`;
+}
+
+export function editWish(...args) { return WishlistView.editWish(...args); }
+export function renderWishlist(...args) { return WishlistView.renderWishlist(...args); }
+export function openWishModal(...args) { return WishlistView.openWishModal(...args); }
+
+function setModalMedia(url, alt = '') {
+  const oldEl = document.getElementById('modalImg');
+  if (!oldEl) return;
+
+  const safeUrl = String(url || '');
+  const kind = getMediaKind(safeUrl);
+
+  let newEl;
+
+  if (kind === 'animation') {
+    newEl = document.createElement('video');
+    newEl.autoplay = true;
+    newEl.loop = true;
+    newEl.muted = true;
+    newEl.playsInline = true;
+    newEl.preload = 'metadata';
+    newEl.src = safeUrl;
+    newEl.onclick = (event) => event.stopPropagation();
+  } else if (kind === 'video') {
+    newEl = document.createElement('video');
+    newEl.controls = true;
+    newEl.preload = 'metadata';
+    newEl.playsInline = true;
+    newEl.src = safeUrl;
+    newEl.onclick = (event) => event.stopPropagation();
+  } else {
+    newEl = document.createElement('img');
+    newEl.src = safeUrl;
+    newEl.alt = alt || '';
+
+    newEl.onclick = (event) => {
+      event.stopPropagation();
+      if (safeUrl) openLightbox(safeUrl, 'modal');
+    };
+  }
+
+  newEl.id = 'modalImg';
+
+  // zoomable только для фото, не для видео/gif-анимаций
+  newEl.className = 'modal-img ' + (safeUrl && kind === 'image' ? 'zoomable' : '');
+
+  newEl.style.display = safeUrl ? 'block' : 'none';
+
+  oldEl.replaceWith(newEl);
+}
+
+function setLightboxMedia(url, alt = '') {
+  const oldEl = document.getElementById('lightboxImg');
+  if (!oldEl) return;
+
+  const safeUrl = String(url || '');
+  const kind = getMediaKind(safeUrl);
+
+  let newEl;
+
+  if (kind === 'animation') {
+    newEl = document.createElement('video');
+    newEl.autoplay = true;
+    newEl.loop = true;
+    newEl.muted = true;
+    newEl.playsInline = true;
+    newEl.preload = 'metadata';
+    newEl.src = safeUrl;
+    newEl.onclick = (event) => event.stopPropagation();
+  } else if (kind === 'video') {
+    newEl = document.createElement('video');
+    newEl.controls = true;
+    newEl.preload = 'metadata';
+    newEl.playsInline = true;
+    newEl.src = safeUrl;
+    newEl.onclick = (event) => event.stopPropagation();
+  } else {
+    newEl = document.createElement('img');
+    newEl.src = safeUrl;
+    newEl.alt = alt || '';
+    newEl.onclick = (event) => event.stopPropagation();
+  }
+
+  newEl.id = 'lightboxImg';
+
+  if (kind === 'animation') {
+    newEl.className = 'lightbox-media lightbox-animation';
+  } else if (kind === 'video') {
+    newEl.className = 'lightbox-media lightbox-video';
+  } else {
+    newEl.className = 'lightbox-media';
+  }
+
+  newEl.style.display = safeUrl ? 'block' : 'none';
+
+  oldEl.replaceWith(newEl);
 }
 
 export function openModal(id) {
@@ -961,14 +1071,15 @@ export function openModal(id) {
   <div class="modal-row"><span class="modal-label">Статус</span><span class="badge ${badgeClass(item.status)}">${H(item.status || '—')}</span></div>`;
 
   const imgs = item.imageUrls?.length ? item.imageUrls : (item.imageUrl ? [item.imageUrl] : []);
+  window.currentModalImages = imgs;
   let imgIdx = 0; const modalImg = document.getElementById('modalImg');
   function updateModalImg() {
-    modalImg.src = imgs[imgIdx] || ''; modalImg.style.display = imgs.length ? 'block' : 'none'; modalImg.className = 'modal-img ' + (imgs.length ? 'zoomable' : '');
+    setModalMedia(imgs[imgIdx] || '', item?.name || '');
     modalImg.onclick = imgs.length ? () => openLightbox(imgs[imgIdx], item.id) : null;
     document.getElementById('modalImgCounter').textContent = imgs.length > 1 ? `${imgIdx + 1} / ${imgs.length}` : '';
     document.getElementById('modalImgPrev').style.display = imgs.length > 1 ? 'flex' : 'none'; document.getElementById('modalImgNext').style.display = imgs.length > 1 ? 'flex' : 'none';
   }
-  
+
   const receiveBtn = document.getElementById('modalReceive');
   if (item.status === 'Получено') { receiveBtn.style.display = 'none'; } else {
     receiveBtn.style.display = 'flex'; receiveBtn.onclick = () => { state.items.find(i => i.id === id).status = 'Получено'; persist(); render(); renderShelf(); toast('✅ Получено! Фигурка добавлена на полку'); closeModal(); };
@@ -1014,6 +1125,15 @@ export function renderShelf() {
   });
 
   const totalSpent = received.reduce((s, i) => s + i.totalPaid, 0);
+  const makerTop = Object.entries(received.reduce((acc, i) => { const key = i.manufacturer || '—'; acc[key] = (acc[key] || 0) + 1; return acc; }, {})).sort((a, b) => b[1] - a[1])[0];
+  const shelfHero = document.getElementById('shelfHero');
+  if (shelfHero) {
+    shelfHero.innerHTML = `
+      <div class="shelf-hero-cell"><span>На полке</span><strong>${received.length}</strong><small>полученных фигурок</small></div>
+      <div class="shelf-hero-cell"><span>Стоимость</span><strong>${eur(totalSpent)}</strong><small>с доставкой и налогами</small></div>
+      <div class="shelf-hero-cell"><span>Топ производитель</span><strong>${H(makerTop?.[0] || '—')}</strong><small>${makerTop ? `${makerTop[1]} шт.` : 'пока нет данных'}</small></div>
+      <div class="shelf-hero-cell"><span>Показано</span><strong>${items.length}</strong><small>по текущему фильтру</small></div>`;
+  }
   const stats = document.getElementById('shelfStats');
   if (stats) stats.innerHTML = `<span style="color:var(--green);font-weight:700;">${received.length} фигурок</span> · итого <span style="color:var(--green);font-weight:700;">€${totalSpent.toFixed(2)}</span>`;
   const grid = document.getElementById('shelfGrid');
@@ -1027,18 +1147,38 @@ export function renderShelf() {
     </div>`).join('');
 }
 
-export function openLightbox(url, context = 'gallery') {
+export function openLightbox(src, context = 'gallery') {
+  if (!src) return;
+
   const overlay = document.getElementById('lightboxOverlay');
-  if (!overlay) return;
-  if (context === 'gallery') { appState.lightboxPhotos = [...document.querySelectorAll('#galleryGrid img.zoomable')].map(img => img.src).filter(Boolean); }
-  else {
-    const item = state.items.find(i => String(i.id) === String(context));
-    if (item) { appState.lightboxPhotos = item.imageUrls?.length ? item.imageUrls : item.imageUrl ? [item.imageUrl] : []; }
-    else { appState.lightboxPhotos = [url]; }
+  const counter = document.getElementById('lightboxCounter');
+
+  if (context === 'gallery') {
+    appState.lightboxPhotos = [...document.querySelectorAll('#galleryGrid [data-media-url]')]
+      .map(el => el.dataset.mediaUrl)
+      .filter(Boolean);
+
+    appState.lightboxIndex = Math.max(0, appState.lightboxPhotos.indexOf(src));
+  } else if (context === 'modal') {
+    appState.lightboxPhotos = Array.isArray(window.currentModalImages)
+      ? window.currentModalImages
+      : [src];
+
+    appState.lightboxIndex = Math.max(0, appState.lightboxPhotos.indexOf(src));
+  } else {
+    appState.lightboxPhotos = [src];
+    appState.lightboxIndex = 0;
   }
-  appState.lightboxIndex = appState.lightboxPhotos.indexOf(url);
-  if (appState.lightboxIndex === -1) { appState.lightboxPhotos = [url]; appState.lightboxIndex = 0; }
-  showLightboxPhoto(); overlay.style.display = 'flex'; document.addEventListener('keydown', lightboxKeyHandler);
+
+  setLightboxMedia(appState.lightboxPhotos[appState.lightboxIndex] || src);
+
+  overlay.style.display = 'flex';
+
+  if (counter) {
+    counter.textContent = appState.lightboxPhotos.length > 1
+      ? `${appState.lightboxIndex + 1}/${appState.lightboxPhotos.length}`
+      : '';
+  }
 }
 
 export function showLightboxPhoto() {
@@ -1049,8 +1189,22 @@ export function showLightboxPhoto() {
 }
 
 export function lightboxNav(dir) {
-  if (!appState.lightboxPhotos.length) return;
-  appState.lightboxIndex = (appState.lightboxIndex + dir + appState.lightboxPhotos.length) % appState.lightboxPhotos.length; showLightboxPhoto();
+  const photos = appState.lightboxPhotos || [];
+  if (!photos.length) return;
+
+  appState.lightboxIndex =
+    (appState.lightboxIndex + dir + photos.length) % photos.length;
+
+  const currentUrl = photos[appState.lightboxIndex];
+
+  setLightboxMedia(currentUrl);
+
+  const counter = document.getElementById('lightboxCounter');
+  if (counter) {
+    counter.textContent = photos.length > 1
+      ? `${appState.lightboxIndex + 1}/${photos.length}`
+      : '';
+  }
 }
 
 export function lightboxKeyHandler(e) { if (e.key === 'ArrowRight') lightboxNav(1); if (e.key === 'ArrowLeft') lightboxNav(-1); }
@@ -1086,40 +1240,162 @@ export function renderCalendar() {
     let classes = 'calendar-month';
     if (appState.currentCalendarYear === currentYear && m === currentMonth) classes += ' current';
     else if (appState.currentCalendarYear < currentYear || (appState.currentCalendarYear === currentYear && m < currentMonth)) classes += ' past';
-    html += `<div class="${classes}"><div class="month-name"><span>${MONTH_NAMES[m]}</span><span style="font-size:12px;color:var(--muted);font-weight:normal;">${itemsInMonth.length ? itemsInMonth.length + ' шт.' : ''}</span></div><div class="month-items">${itemsInMonth.length ? itemsInMonth.map(item => `<div class="calendar-item" onclick="${item._type === 'collection' ? `openModal('${H(item.id)}')` : `openWishModal('${H(item.id)}')`}">${item.imageUrl ? `<img src="${H(item.imageUrl)}" loading="lazy">` : `<div style="width:44px;height:44px;background:var(--panel-3);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;">📦</div>`}<div class="calendar-item-info"><div class="calendar-item-name">${H(item.name)}</div><div class="calendar-item-type">${item._type === 'collection' ? '📦 В коллекции/Предзаказ' : '⭐ Вишлист'}</div></div></div>`).join('') : '<div style="font-size:12px;color:var(--faint);text-align:center;padding:14px 0;">Нет релизов</div>'}</div></div>`;
+    html += `<div class="${classes}"><div class="month-name"><span>${MONTH_NAMES[m]}</span><span style="font-size:12px;color:var(--muted);font-weight:normal;">${itemsInMonth.length ? itemsInMonth.length + ' шт.' : ''}</span></div><div class="month-items">${itemsInMonth.length ? itemsInMonth.map(item => `<div class="calendar-item" onclick="${item._type === 'collection' ? `openModal('${H(item.id)}')` : `openWishModal('${H(item.id)}')`}">${item.imageUrl
+      ? renderClickableMedia(item.imageUrl, 'figure-img', item.name, item.id)
+      : `<div class="figure-img" style="display:flex;align-items:center;justify-content:center;font-size:36px;">📦</div>`}<div class="calendar-item-info"><div class="calendar-item-name">${H(item.name)}</div><div class="calendar-item-type">${item._type === 'collection' ? '📦 В коллекции/Предзаказ' : '⭐ Вишлист'}</div></div></div>`).join('') : '<div style="font-size:12px;color:var(--faint);text-align:center;padding:14px 0;">Нет релизов</div>'}</div></div>`;
   }
   document.getElementById('calendarGrid').innerHTML = html;
 }
 
-export async function grabFromTampermonkey(target = 'main') {
+function waitForTampermonkeyForm(ms = 50) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function ensureTampermonkeyFormOpen(target = 'main') {
+  const fieldId = target === 'wish' ? 'wName' : 'fName';
+  const overlayId = target === 'wish' ? 'wishFormOverlay' : 'formOverlay';
+  const overlay = document.getElementById(overlayId);
+  const isOpen = !overlay || overlay.style.display !== 'none';
+  if (document.getElementById(fieldId) && isOpen) return true;
+
+  const opener = target === 'wish' ? window.openWishForm : window.openForm;
+  if (typeof opener === 'function') {
+    opener();
+    await waitForTampermonkeyForm();
+  }
+
+  return Boolean(document.getElementById(fieldId));
+}
+
+function setValueIfExists(id, value) {
+  const el = document.getElementById(id);
+  if (!el) {
+    console.warn('[Tampermonkey import] field not found:', id);
+    return false;
+  }
+  el.value = value ?? '';
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  console.log('[Tampermonkey import] set', id, '=>', el.value);
+  return true;
+}
+
+async function grabFromTampermonkeyLegacy(target = 'main') {
   try {
     const text = await navigator.clipboard.readText();
-    const data = JSON.parse(text);
-    const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+
+    if (!text || !text.trim()) {
+      toast?.('\u0411\u0443\u0444\u0435\u0440 \u043E\u0431\u043C\u0435\u043D\u0430 \u043F\u0443\u0441\u0442');
+      return null;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      toast?.('\u0412 \u0431\u0443\u0444\u0435\u0440\u0435 \u043D\u0435\u0442 JSON \u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u043E\u0432\u0430\u0440\u0430');
+      return null;
+    }
+
+    const item = Array.isArray(data.items) ? data.items[0] : data;
+
+    if (!item || typeof item !== 'object') {
+      toast?.('\u0424\u043E\u0440\u043C\u0430\u0442 \u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u043E\u0432\u0430\u0440\u0430 \u043D\u0435 \u0440\u0430\u0441\u043F\u043E\u0437\u043D\u0430\u043D');
+      return null;
+    }
+
+    const name = item.name || '';
+    const price = item.price || '';
+    const maker = item.maker || item.brand || '';
+    const store = item.store || item.shop || data.sourceName || '';
+    const img = item.imageUrl || item.img || '';
+    const url = item.sourceUrl || item.url || '';
+    const month = item.month || '';
+    const year = item.year || '';
+
+    await ensureTampermonkeyFormOpen(target);
 
     if (target === 'wish') {
-      setVal('wName', data.name);
-      setVal('wPrice', data.price);
-      setVal('wMaker', data.brand);
-      setVal('wImg', data.img);
-      setVal('wDate', [data.month, data.year].filter(Boolean).join(' '));
-      setVal('wShopUrl', data.url);
-    } else {
-      setVal('fName', data.name);
-      setVal('fPrice', data.price);
-      setVal('fMaker', data.brand);
-      setVal('fImg', data.img);
-      setVal('fDateMonth', data.month);
-      setVal('fDateYear', data.year);
-      setVal('fShopUrl', data.url);
+      const didFill = [
+        setValueIfExists('wName', name),
+        setValueIfExists('wStore', store),
+        setValueIfExists('wPrice', price),
+        setValueIfExists('wMaker', maker),
+        setValueIfExists('wImg', img),
+        setValueIfExists('wDate', item.releaseDate || [month, year].filter(Boolean).join(' ')),
+        setValueIfExists('wShopUrl', url)
+      ].some(Boolean);
+      if (!didFill) {
+        toast?.('\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0444\u043E\u0440\u043C\u0443 wishlist');
+        return null;
+      }
+      toast?.('\u0414\u0430\u043D\u043D\u044B\u0435 \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u044B \u0432 wishlist');
+      return item;
+    }
+
+    const didFill = [
+      setValueIfExists('fName', name),
+      setValueIfExists('fStore', store),
+      setValueIfExists('fPrice', price),
+      setValueIfExists('fMaker', maker),
+      setValueIfExists('fImg', img),
+      setValueIfExists('fDateMonth', month),
+      setValueIfExists('fDateYear', year),
+      setValueIfExists('fShopUrl', url)
+    ].some(Boolean);
+
+    if (!didFill) {
+      toast?.('\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043E\u0442\u043A\u0440\u043E\u0439 \u0444\u043E\u0440\u043C\u0443 \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u0438\u044F \u0437\u0430\u043A\u0430\u0437\u0430');
+      return null;
+    }
+
+    if (typeof updateEurPreview === 'function') {
       updateEurPreview();
     }
 
-    alert('✅ Успешно! Данные из Tampermonkey вставлены в форму.');
-  } catch (err) { alert('Ошибка при чтении данных!'); }
+    toast?.('\u0414\u0430\u043D\u043D\u044B\u0435 \u0442\u043E\u0432\u0430\u0440\u0430 \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u044B');
+    return item;
+  } catch (err) {
+    console.error('[grabFromTampermonkeyLegacy]', err);
+
+    if (err?.name === 'NotAllowedError') {
+      toast?.('\u0411\u0440\u0430\u0443\u0437\u0435\u0440 \u043D\u0435 \u0434\u0430\u043B \u0434\u043E\u0441\u0442\u0443\u043F \u043A \u0431\u0443\u0444\u0435\u0440\u0443 \u043E\u0431\u043C\u0435\u043D\u0430');
+      return null;
+    }
+
+    toast?.('\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0432\u0441\u0442\u0430\u0432\u0438\u0442\u044C \u0434\u0430\u043D\u043D\u044B\u0435 \u0438\u0437 \u0431\u0443\u0444\u0435\u0440\u0430');
+    return null;
+  }
+}
+
+export async function grabFromTampermonkey(target = 'main') {
+  try {
+    const result = await grabFromClipboard(target, {
+      toast,
+      updateEurPreview
+    });
+    if (result) return result;
+    console.warn('[grabFromTampermonkey] new importer returned no item, trying legacy fallback');
+    return await grabFromTampermonkeyLegacy(target);
+  } catch (err) {
+    console.warn('[grabFromTampermonkey] new importer failed, trying legacy fallback', err);
+    return await grabFromTampermonkeyLegacy(target);
+  }
 }
 
 export function autofillFromLink(target = 'main') {
+  return grabFromTampermonkey(target);
+}
+
+export async function debugTampermonkeyImport(target = 'main') {
+  console.log('[Tampermonkey debug] target:', target);
+  console.log('[Tampermonkey debug] typeof window.grabFromTampermonkey:', typeof window.grabFromTampermonkey);
+  try {
+    const text = await navigator.clipboard.readText();
+    console.log('[Tampermonkey debug] clipboard text:', text);
+  } catch (err) {
+    console.warn('[Tampermonkey debug] clipboard read failed:', err);
+  }
   return grabFromTampermonkey(target);
 }
 
@@ -1206,17 +1482,20 @@ export function goHome() {
 }
 
 export function render() {
+  applyUiDensity();
   const orders = getOrders();
   const stores = [...new Set(orders.map(o => o.store).filter(Boolean))].sort();
   const regions = [...new Set(orders.flatMap(o => o.items.map(i => i.region)).filter(Boolean))].sort();
   const storeEl = document.getElementById('filterStore'); const regionEl = document.getElementById('filterRegion');
-  if (storeEl) { const sv = storeEl.value; storeEl.innerHTML = '<option value="">Все магазины</option>' + stores.map(s => `<option value="${H(s)}"${s === sv ? ' selected' : ''}>${H(s)}</option>`).join(''); }
-  if (regionEl) { const rv = regionEl.value; regionEl.innerHTML = '<option value="">Все регионы</option>' + regions.map(r => `<option value="${H(r)}"${r === rv ? ' selected' : ''}>${H(r)}</option>`).join(''); }
+  if (storeEl) { const sv = storeEl.value; storeEl.innerHTML = `<option value="">${t('common.allStores')}</option>` + stores.map(s => `<option value="${H(s)}"${s === sv ? ' selected' : ''}>${H(s)}</option>`).join(''); }
+  if (regionEl) { const rv = regionEl.value; regionEl.innerHTML = `<option value="">${t('common.allRegions')}</option>` + regions.map(r => `<option value="${H(r)}"${r === rv ? ' selected' : ''}>${H(r)}</option>`).join(''); }
   renderSidebar();
   renderDetail();
   initLightboxTouch();
   updateWishlistBadge();
   if (appState.currentTab === 'wishlist') renderWishlist();
+  updateWishlistBadge();
+  applyI18n();
 }
 
 // Background Particles
@@ -1284,6 +1563,19 @@ export function initParticles() {
   resize();
   requestAnimationFrame(draw);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

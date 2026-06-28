@@ -4,14 +4,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <link rel="icon"
-    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
+  <link rel="shortcut icon" href="icons/favicon.ico">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="icons/icon-48.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <title>Figure Collection Tracker</title>
   <meta name="theme-color" content="#15181f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Figure Tracker">
   <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 
@@ -19,26 +22,30 @@
   <canvas id="particles"></canvas>
   <div class="app">
     <header class="topbar">
-      <div class="topbar-logo" onclick="goHome()" style="cursor:pointer;" title="На главную">
+      <div class="topbar-logo" onclick="goHome()" style="cursor:pointer;" title="На главную" data-i18n-title="top.home">
         Figure<span>.</span>Tracker</div>
       <div class="topbar-right">
+        <div class="lang-switch" aria-label="Language">
+          <button class="lang-option" type="button" data-lang-option="ru">RU</button>
+          <button class="lang-option" type="button" data-lang-option="en">EN</button>
+        </div>
         <span class="rates-badge loading" id="ratesBadge" title="Нажми чтобы обновить"
           onclick="fetchRates(true)">Загружаю курсы...</span>
-        <button class="btn btn-sm" id="importBtn">Импорт</button>
-        <button class="btn btn-sm" id="exportBtn">Экспорт JSON</button>
-        <button class="btn btn-sm" id="backupBtn">Google Drive</button>
-        <button class="btn btn-primary btn-sm" id="addItemBtn">+ Добавить заказ</button>
+        <!--<button class="btn btn-sm" id="importBtn" data-i18n="top.import">Импорт</button>-->
+        <!--<button class="btn btn-sm" id="exportBtn" data-i18n="top.export">Экспорт JSON</button>-->
+        <!--<button class="btn btn-sm" id="backupBtn" data-i18n="top.drive">Google Drive</button>-->
+        <button class="btn btn-primary btn-sm" id="addItemBtn" data-i18n="top.addOrder">+ Добавить заказ</button>
         <input type="file" id="importFile" accept="application/json" style="display:none" />
       </div>
     </header>
     <div class="nav-tabs" id="mainTabs">
-      <div class="nav-tab active" data-tab="collection">📦 Коллекция</div>
+      <div class="nav-tab active" data-tab="collection" data-i18n="nav.collection">📦 Коллекция</div>
       <div class="nav-tab" data-tab="wishlist">⭐ Вишлист</div>
-      <div class="nav-tab" data-tab="gallery">🖼 Галерея</div>
-      <div class="nav-tab" data-tab="calendar">📅 Календарь</div>
-      <div class="nav-tab" data-tab="analytics">📊 Аналитика</div>
-      <div class="nav-tab" data-tab="shelf">🗂️ Полка</div>
-      <div class="nav-tab" data-tab="settings" style="margin-left:auto;">⚙️ Настройки</div>
+      <div class="nav-tab" data-tab="gallery" data-i18n="nav.gallery">🖼 Галерея</div>
+      <div class="nav-tab" data-tab="calendar" data-i18n="nav.calendar">📅 Календарь</div>
+      <div class="nav-tab" data-tab="analytics" data-i18n="nav.analytics">📊 Аналитика</div>
+      <div class="nav-tab" data-tab="shelf" data-i18n="nav.shelf">🗂️ Полка</div>
+      <div class="nav-tab" data-tab="settings" style="margin-left:auto;" data-i18n="nav.settings">⚙️ Настройки</div>
     </div>
     <div id="releaseBanner"
       style="display: none; align-items: center; justify-content: center; width: 100%; height: auto; min-height: 35px; max-height: 35px; padding: 8px 20px; font-size: 13px; flex-shrink: 0; flex-wrap: wrap; gap: 6px; box-sizing: border-box; border-bottom: 1px solid transparent; transition: all 0.3s ease;">
@@ -46,41 +53,41 @@
     <div class="main">
       <nav class="sidebar">
         <div class="sidebar-head">
-          <input class="sidebar-search" id="searchInput" placeholder="Поиск по названию, заказу, магазину..." />
+          <input class="sidebar-search" id="searchInput" placeholder="Поиск по названию, заказу, магазину..." data-i18n-placeholder="filters.search" />
           <div class="search-suggestions" id="searchSuggestions"></div>
-          <button class="btn btn-sm filter-toggle" id="filterToggle" type="button" aria-expanded="false">☰ Фильтры</button>
+          <button class="btn-sm filter-toggle" id="filterToggle" type="button" aria-expanded="false" data-i18n="filters.toggle">☰ Фильтры</button>
           <div class="sidebar-filter-body" id="sidebarFilterBody">
           <div style="display:flex;gap:8px;">
             <select id="filterStore"
               style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;flex:1;">
-              <option value="">Все магазины</option>
+              <option value="" data-i18n="common.allStores">Все магазины</option>
             </select>
             <select id="filterRegion"
               style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;flex:1;">
-              <option value="">Все регионы</option>
+              <option value="" data-i18n="common.allRegions">Все регионы</option>
             </select>
           </div>
           <select id="sortSelect"
             style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;">
-            <option value="newest">Сначала новые</option>
-            <option value="oldest">Сначала старые</option>
-            <option value="release-asc">📅 Релиз: скоро</option>
-            <option value="release-desc">📅 Релиз: позже</option>
-            <option value="price-desc">Дороже всего</option>
-            <option value="price-asc">Дешевле всего</option>
-            <option value="name">По названию</option>
+            <option value="newest" data-i18n="sort.newest">Сначала новые</option>
+            <option value="oldest" data-i18n="sort.oldest">Сначала старые</option>
+            <option value="release-asc" data-i18n="sort.releaseAsc">📅 Релиз: скоро</option>
+            <option value="release-desc" data-i18n="sort.releaseDesc">📅 Релиз: позже</option>
+            <option value="price-desc" data-i18n="sort.priceDesc">Дороже всего</option>
+            <option value="price-asc" data-i18n="sort.priceAsc">Дешевле всего</option>
+            <option value="name" data-i18n="sort.name">По названию</option>
           </select>
           <div class="sidebar-filters" id="statusFilters">
-            <div class="chip active" data-filter="">Все</div>
-            <div class="chip" data-filter="Не оплачено">Не оплачено</div>
-            <div class="chip" data-filter="Депозит оплачен">Депозит</div>
-            <div class="chip" data-filter="Полностью оплачено">Оплачено</div>
+            <div class="chip active" data-filter="" data-i18n="common.all">Все</div>
+            <div class="chip" data-filter="Не оплачено" data-i18n="status.unpaid">Не оплачено</div>
+            <div class="chip" data-filter="Депозит оплачен" data-i18n="status.deposit">Депозит</div>
+            <div class="chip" data-filter="Полностью оплачено" data-i18n="status.paid">Оплачено</div>
           </div>
           <label
             style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;padding:5px 8px;width: 40%;">
             <input type="checkbox" id="showHiddenToggle" onchange="render();closeFilters()"
               style="accent-color:var(--green);width:14px;height:14px;">
-            Скрытые
+            <span data-i18n="common.hidden">Скрытые</span>
           </label>
           </div>
         </div>
@@ -94,39 +101,40 @@
             <rect x="2" y="3" width="20" height="18" rx="3" />
             <path d="M8 3v18M16 9h2M16 13h2M16 17h2" />
           </svg>
-          <div>Выбери посылку слева или добавь первую фигурку</div>
+          <div data-i18n="common.emptyOrders">Выбери посылку слева или добавь первую фигурку</div>
         </div>
       </main>
       <div id="wishlistPane" style="display:none;grid-column:1/-1;overflow-y:auto;padding:20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-          <div style="font-size:24px;font-weight:800;">⭐ Вишлист</div>
-          <button class="btn btn-primary btn-sm" onclick="openWishForm()">+ Добавить желание</button>
+          <div style="font-size:24px;font-weight:800;" data-i18n="wishlist.title">⭐ Вишлист</div>
+          <button class="btn btn-primary btn-sm" onclick="openWishForm()" data-i18n="wishlist.add">+ Добавить желание</button>
         </div>
         <div class="wish-filters">
-          <input class="wish-search-input" id="wishSearch" placeholder="Поиск по вишлисту..." />
+          <input class="wish-search-input" id="wishSearch" placeholder="Поиск по вишлисту..." data-i18n-placeholder="wishlist.search" />
           <select id="wishPriorityFilter" class="wish-filter-select">
-            <option value="">Все приоритеты</option>
-            <option value="high">🔥 Высокий</option>
-            <option value="mid">⭐ Средний</option>
-            <option value="low">💭 Низкий</option>
+            <option value="" data-i18n="wishlist.allPriorities">Все приоритеты</option>
+            <option value="high" data-i18n="wishlist.priorityHigh">🔥 Высокий</option>
+            <option value="mid" data-i18n="wishlist.priorityMid">⭐ Средний</option>
+            <option value="low" data-i18n="wishlist.priorityLow">💭 Низкий</option>
           </select>
         </div>
+        <div class="wish-stats" id="wishStats"></div>
         <div class="wish-grid" id="wishGrid"></div>
       </div>
     </div>
   </div>
   <div id="galleryPane" style="display:none;grid-column:1/-1;overflow-y:auto;padding:20px;">
     <div class="wish-filters" style="margin-bottom:16px;">
-      <input class="wish-search-input" id="gallerySearch" placeholder="Поиск по галерее..." />
+      <input class="wish-search-input" id="gallerySearch" placeholder="Поиск по галерее..." data-i18n-placeholder="gallery.search" />
 
       <select id="gallerySort" class="wish-filter-select">
-        <option value="newest">Сначала новые</option>
-        <option value="name">По названию</option>
-        <option value="price-desc">Дороже всего</option>
-        <option value="price-asc">Дешевле всего</option>
+        <option value="newest" data-i18n="sort.newest">Сначала новые</option>
+        <option value="name" data-i18n="sort.name">По названию</option>
+        <option value="price-desc" data-i18n="sort.priceDesc">Дороже всего</option>
+        <option value="price-asc" data-i18n="sort.priceAsc">Дешевле всего</option>
       </select>
       <select id="galleryMaker" class="wish-filter-select">
-        <option value="">Все производители</option>
+        <option value="" data-i18n="gallery.allMakers">Все производители</option>
       </select>
       <label
         style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap;">
@@ -146,33 +154,35 @@
   <div id="calendarPane" style="display:none;grid-column:1/-1;overflow-y:auto;padding:20px;">
     <div class="calendar-header"
       style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <button class="btn" onclick="changeCalendarYear(-1)">← Прошлый год</button>
+      <button class="btn" onclick="changeCalendarYear(-1)" data-i18n="calendar.prevYear">← Прошлый год</button>
       <div id="calendarYearDisplay" style="font-size:28px;font-weight:900;letter-spacing:-1px;">2026</div>
-      <button class="btn" onclick="changeCalendarYear(1)">Следующий год →</button>
+      <button class="btn" onclick="changeCalendarYear(1)" data-i18n="calendar.nextYear">Следующий год →</button>
     </div>
     <div class="calendar-grid" id="calendarGrid"></div>
   </div>
 
   <div id="analyticsPane" style="display:none; grid-column:1/-1; grid-row:3; overflow-y:auto; padding:20px;">
-    <div style="font-size:24px; font-weight:800; margin-bottom:20px;">📊 Аналитика коллекции</div>
+    <div style="font-size:24px; font-weight:800; margin-bottom:12px;" data-i18n="analytics.title">📊 Аналитика коллекции</div>
+    <div class="analytics-summary" id="analyticsSummary"></div>
+    <div class="analytics-forecast" id="analyticsForecast"></div>
     <div class="analytics-grid">
       <div class="chart-card donut">
-        <div class="chart-title">Траты по магазинам (€)</div>
+        <div class="chart-title" data-i18n="analytics.storeSpend">Траты по магазинам (€)</div>
         <canvas id="storeChart"></canvas>
       </div>
       <div class="chart-card donut">
-        <div class="chart-title">Траты по производителям (€)</div>
+        <div class="chart-title" data-i18n="analytics.makerSpend">Траты по производителям (€)</div>
         <canvas id="makerChart"></canvas>
       </div>
 
       <div class="chart-card" style="grid-column:1/-1;">
-        <div class="chart-title">📅 Расходы по месяцам</div>
+        <div class="chart-title" data-i18n="analytics.monthSpend">📅 Расходы по месяцам</div>
         <div style="position:relative;height:260px;">
           <canvas id="monthChart"></canvas>
         </div>
         <div>
-          <div class="chart-title" style="color:#67e8f9;">■ Не оплачено</div>
-          <div class="chart-title" style="color:#4ade80;">■ Оплачено/получено</div>
+          <div class="chart-title" style="color:#67e8f9;" data-i18n="analytics.unpaidLegend">■ Не оплачено</div>
+          <div class="chart-title" style="color:#4ade80;" data-i18n="analytics.paidLegend">■ Оплачено/получено</div>
         </div>
 
       </div>
@@ -187,16 +197,17 @@
     style="position:fixed;top:100px;left:0;right:0;bottom:0;overflow-y:auto;padding:20px;z-index:1;display:none;">
     <div
       style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
-      <h2 style="font-size:20px;font-weight:800;">🗂️ Полка — полученные фигурки</h2>
+      <h2 style="font-size:20px;font-weight:800;" data-i18n="shelf.title">🗂️ Полка — полученные фигурки</h2>
       <div id="shelfStats" style="font-size:13px;color:var(--muted);"></div>
     </div>
+    <div class="shelf-hero" id="shelfHero"></div>
     <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-      <input id="shelfSearch" class="wish-search-input" placeholder="🔍 Поиск..." style="flex:1;min-width:160px;">
+      <input id="shelfSearch" class="wish-search-input" placeholder="🔍 Поиск..." data-i18n-placeholder="shelf.search" style="flex:1;min-width:160px;">
       <select id="shelfSort" class="wish-filter-select">
-        <option value="newest">Сначала новые</option>
-        <option value="name">По названию</option>
-        <option value="price-desc">Дороже всего</option>
-        <option value="price-asc">Дешевле всего</option>
+        <option value="newest" data-i18n="sort.newest">Сначала новые</option>
+        <option value="name" data-i18n="sort.name">По названию</option>
+        <option value="price-desc" data-i18n="sort.priceDesc">Дороже всего</option>
+        <option value="price-asc" data-i18n="sort.priceAsc">Дешевле всего</option>
       </select>
     </div>
     <div id="shelfGrid" class="gallery-grid"></div>
@@ -204,17 +215,17 @@
 
   <!-- Настройки -->
   <div id="settingsPane"
-    style="position:fixed;top:100px;left:0;right:0;bottom:0;overflow-y:auto;padding:20px;background:var(--bg);z-index:1;display:none;">
+    style="position:fixed;top:100px;left:0;right:0;bottom:0;overflow-y:auto;padding:20px;z-index:1;display:none;">
     <div style="max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:16px;">
 
-      <h2 style="font-size:20px;font-weight:800;margin-bottom:4px;">⚙️ Настройки</h2>
+      <h2 style="font-size:20px;font-weight:800;margin-bottom:4px;" data-i18n="settings.title">⚙️ Настройки</h2>
 
       <!-- Дефолты формы -->
       <div class="breakdown" style="position:unset;">
-        <div class="breakdown-title">Значения по умолчанию</div>
+        <div class="breakdown-title" data-i18n="settings.defaults">Значения по умолчанию</div>
         <div class="form-grid" style="margin-top:10px;">
           <div class="form-group">
-            <div class="form-label">Регион</div>
+            <div class="form-label" data-i18n="settings.region">Регион</div>
             <select id="sRegion" onchange="saveSettings()">
               <option value="Япония">Япония</option>
               <option value="Китай">Китай</option>
@@ -224,7 +235,7 @@
             </select>
           </div>
           <div class="form-group">
-            <div class="form-label">Валюта</div>
+            <div class="form-label" data-i18n="settings.currency">Валюта</div>
             <select id="sCurrency" onchange="saveSettings()">
               <option value="JPY">JPY</option>
               <option value="USD">USD</option>
@@ -232,15 +243,29 @@
             </select>
           </div>
           <div class="form-group">
-            <div class="form-label">Магазин</div>
+            <div class="form-label" data-i18n="settings.store">Магазин</div>
             <input id="sStore" placeholder="AmiAmi" oninput="saveSettings()" />
           </div>
           <div class="form-group">
-            <div class="form-label">Метод доставки</div>
+            <div class="form-label" data-i18n="settings.shippingMethod">Метод доставки</div>
             <select id="sShipMethod" onchange="saveSettings()">
               <option value="small_packet">Small Packet</option>
               <option value="ems">EMS</option>
               <option value="surface">Surface Parcel</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.density">Плотность интерфейса</div>
+            <select id="sDensity" onchange="saveSettings()">
+              <option value="compact" data-i18n="settings.densityCompact">Compact</option>
+              <option value="comfortable" data-i18n="settings.densityComfortable">Comfortable</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.theme">Тема</div>
+            <select id="sTheme" onchange="saveSettings()">
+              <option value="cyberpunk" data-i18n="settings.themeCyberpunk">Cyberpunk</option>
+              <option value="clean" data-i18n="settings.themeClean">Clean dark</option>
             </select>
           </div>
         </div>
@@ -248,10 +273,10 @@
 
       <!-- Данные -->
       <div class="breakdown">
-        <div class="breakdown-title">Данные и Синхронизация</div>
+        <div class="breakdown-title" data-i18n="settings.dataSync">Данные и Синхронизация</div>
 
         <div class="form-group" style="margin-top:10px; margin-bottom:16px;">
-          <div class="form-label">Ссылка на ваш Google Script (API Диска)</div>
+          <div class="form-label" data-i18n="settings.googleScript">Ссылка на ваш Google Script (API Диска)</div>
           <input id="sScriptUrl" placeholder="https://script.google.com/macros/s/.../exec" oninput="saveSettings()"
             style="border-color:var(--accent);" />
           <div style="font-size:11px;color:var(--muted);margin-top:6px;">Сюда нужно вставить Web App URL вашего
@@ -259,16 +284,16 @@
         </div>
         <!-- Настройки Telegram -->
         <div class="breakdown" style="margin-top: 15px;">
-          <div class="breakdown-title">Интеграция с Telegram (Хранилище фото)</div>
+          <div class="breakdown-title" data-i18n="settings.telegram">Интеграция с Telegram (Хранилище фото)</div>
 
           <div class="form-group" style="margin-top:10px; margin-bottom:12px;">
-            <div class="form-label">Telegram Bot Token</div>
+            <div class="form-label" data-i18n="settings.tgToken">Telegram Bot Token</div>
             <input id="sTgBotToken" placeholder="123456789:ABCdefGhI..." oninput="saveSettings()"
               style="border-color:var(--accent);" />
           </div>
 
           <div class="form-group" style="margin-bottom:16px;">
-            <div class="form-label">ID чата / канала (или @username)</div>
+            <div class="form-label" data-i18n="settings.tgChat">ID чата / канала (или @username)</div>
             <input id="sTgChatId" placeholder="@my_figures_channel" oninput="saveSettings()"
               style="border-color:var(--accent);" />
             <div style="font-size:11px;color:var(--muted);margin-top:6px;">
@@ -280,70 +305,70 @@
         <div style="display:flex;flex-direction:column;gap:10px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:13px;font-weight:600;">Экспорт резервной копии</div>
-              <div style="font-size:11px;color:var(--muted);">Скачать все данные в JSON</div>
+              <div style="font-size:13px;font-weight:600;" data-i18n="settings.exportBackup">Экспорт резервной копии</div>
+              <div style="font-size:11px;color:var(--muted);" data-i18n="settings.exportBackupHelp">Скачать все данные в JSON</div>
             </div>
-            <button class="btn btn-sm" onclick="exportData()">📤 Экспорт</button>
+            <button class="btn btn-sm" onclick="exportData()">📤 <span data-i18n="top.export">Экспорт JSON</span></button>
           </div>
           <div
             style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:13px;font-weight:600;">Импорт резервной копии</div>
-              <div style="font-size:11px;color:var(--muted);">Загрузить данные из JSON</div>
+              <div style="font-size:13px;font-weight:600;" data-i18n="settings.importBackup">Импорт резервной копии</div>
+              <div style="font-size:11px;color:var(--muted);" data-i18n="settings.importBackupHelp">Загрузить данные из JSON</div>
             </div>
-            <button class="btn btn-sm" onclick="document.getElementById('importFile').click()">📥 Импорт</button>
+            <button class="btn btn-sm" onclick="document.getElementById('importFile').click()">📥 <span data-i18n="top.import">Импорт</span></button>
           </div>
           <div
             style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
             <div>
               <div style="font-size:13px;font-weight:600;">Google Drive</div>
-              <div style="font-size:11px;color:var(--muted);">Сохранить / загрузить бекап</div>
+              <div style="font-size:11px;color:var(--muted);" data-i18n="settings.driveHelp">Сохранить / загрузить бекап</div>
             </div>
             <div style="display:flex;">
-              <button id="backupBtnSettings" class="btn btn-sm" onclick="backupToDrive(false)">☁️ Сохранить</button>
+              <button id="backupBtnSettings" class="btn btn-sm" onclick="backupToDrive(false)">☁️ <span data-i18n="common.save">Сохранить</span></button>
             </div>
           </div>
           <div
             style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:13px;font-weight:600;">Загрузить с Google Drive</div>
-              <div style="font-size:11px;color:var(--muted);">Заменить локальные данные данными из Drive</div>
+              <div style="font-size:13px;font-weight:600;" data-i18n="settings.loadDrive">Загрузить с Google Drive</div>
+              <div style="font-size:11px;color:var(--muted);" data-i18n="settings.loadDriveHelp">Заменить локальные данные данными из Drive</div>
             </div>
-            <button id="loadDriveBtn" class="btn btn-sm" onclick="loadFromDrive()">☁️ Загрузить</button>
+            <button id="loadDriveBtn" class="btn btn-sm" onclick="loadFromDrive()">☁️ <span data-i18n="settings.loadDrive">Загрузить</span></button>
           </div>
           <div
             style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:13px;font-weight:600;">Статистика</div>
+              <div style="font-size:13px;font-weight:600;" data-i18n="settings.stats">Статистика</div>
               <div style="font-size:11px;color:var(--muted);" id="settingsStats">—</div>
             </div>
           </div>
           <div style="border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:10px;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
               <div>
-                <div style="font-size:13px;font-weight:600;">Локальные копии</div>
-                <div style="font-size:11px;color:var(--muted);">Автокопии перед импортом и очисткой, плюс ручное сохранение</div>
+                <div style="font-size:13px;font-weight:600;" data-i18n="settings.localCopies">Локальные копии</div>
+                <div style="font-size:11px;color:var(--muted);" data-i18n="settings.localCopiesHelp">Автокопии перед импортом и очисткой, плюс ручное сохранение</div>
               </div>
-              <button class="btn btn-sm" onclick="createLocalBackup('manual')">Сохранить копию</button>
+              <button class="btn btn-sm" onclick="createLocalBackup('manual')" data-i18n="settings.saveCopy">Сохранить копию</button>
             </div>
             <div id="localBackupsList" class="local-backups-list"></div>
           </div>
           <div
             style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:13px;font-weight:600;color:var(--red);">Очистить все данные</div>
-              <div style="font-size:11px;color:var(--muted);">Удалить всю коллекцию и вишлист</div>
+              <div style="font-size:13px;font-weight:600;color:var(--red);" data-i18n="settings.clearAll">Очистить все данные</div>
+              <div style="font-size:11px;color:var(--muted);" data-i18n="settings.clearAllHelp">Удалить всю коллекцию и вишлист</div>
             </div>
-            <button class="btn btn-sm btn-danger" onclick="clearAllData()">🗑️ Очистить</button>
+            <button class="btn btn-sm btn-danger" onclick="clearAllData()">🗑️ <span data-i18n="settings.clearAll">Очистить</span></button>
           </div>
         </div>
         <!-- О приложении -->
         <div class="breakdown">
-          <div class="breakdown-title">О приложении</div>
+          <div class="breakdown-title" data-i18n="settings.about">О приложении</div>
           <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.7;">
             <div>📦 Figure Collection Tracker</div>
-            <div>Данные хранятся локально в браузере (localStorage)</div>
-            <div style="margin-top:6px;font-size:11px;">Делай бекапы регулярно!</div>
+            <div data-i18n="settings.localData">Данные хранятся локально в браузере (localStorage)</div>
+            <div style="margin-top:6px;font-size:11px;" data-i18n="settings.backupReminder">Делай бекапы регулярно!</div>
           </div>
         </div>
 
@@ -372,43 +397,43 @@
   <div class="form-overlay" id="formOverlay" style="display:none">
     <div class="form-panel">
       <div class="form-title">
-        <span id="formTitle">Добавить фигурку</span>
+        <span id="formTitle" data-i18n="form.addFigure">Добавить фигурку</span>
         <button class="btn btn-icon" onclick="closeForm()">✕</button>
       </div>
       <div class="form-grid">
         <div class="form-group full">
-          <div class="form-label">Название фигурки *</div>
+          <div class="form-label" data-i18n="form.name">Название фигурки *</div>
           <input id="fName" placeholder="Hatsune Miku Rabbit Hole" />
         </div>
         <div class="form-group">
-          <div class="form-label">Номер заказа *</div>
+          <div class="form-label" data-i18n="form.orderNumber">Номер заказа *</div>
           <input id="fOrder" placeholder="А23456789" list="orderSuggestions" />
           <datalist id="orderSuggestions"></datalist>
         </div>
         <div class="form-group">
-          <div class="form-label">Название посылки</div>
+          <div class="form-label" data-i18n="form.orderName">Название посылки</div>
           <input id="fOrderName" placeholder="Сентябрь 2026: Miku + AMG" />
         </div>
         <div class="form-group">
-          <div class="form-label">Магазин</div>
+          <div class="form-label" data-i18n="settings.store">Магазин</div>
           <input id="fStore" placeholder="AmiAmi" />
         </div>
         <div class="form-group">
-          <div class="form-label">Трек-номер (для всей посылки)</div>
+          <div class="form-label" data-i18n="form.tracking">Трек-номер (для всей посылки)</div>
           <input id="fTracking" placeholder="JJFI00000000000000000" />
         </div>
         <div class="form-group">
-          <div class="form-label">Дата заказа</div>
+          <div class="form-label" data-i18n="form.orderDate">Дата заказа</div>
           <input id="fOrderDate" type="date"
             style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;box-sizing:border-box;" />
         </div>
         <div class="form-group">
-          <div class="form-label">Дата отправки</div>
+          <div class="form-label" data-i18n="form.shipDate">Дата отправки</div>
           <input id="fShipDate" type="date"
             style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;box-sizing:border-box;" />
         </div>
         <div class="form-group">
-          <div class="form-label">Регион отправки</div>
+          <div class="form-label" data-i18n="form.region">Регион отправки</div>
           <select id="fRegion">
             <option value="Япония">Япония</option>
             <option value="Китай">Китай</option>
@@ -418,25 +443,25 @@
           </select>
         </div>
         <div class="form-group">
-          <div class="form-label">Производитель</div>
+          <div class="form-label" data-i18n="form.maker">Производитель</div>
           <input id="fMaker" placeholder="Good Smile Company" />
         </div>
         <div class="form-group">
-          <div class="form-label">Тип / Масштаб</div>
+          <div class="form-label" data-i18n="form.scale">Тип / Масштаб</div>
           <select id="fScale"
             style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;">
-            <option value="">— не указано —</option>
+            <option value="" data-i18n="form.scaleEmpty">— не указано —</option>
             <option value="small">Мелкий (Нендо, Prize, PUP, 1/64) ~15€</option>
             <option value="standard">Стандарт (Scale 1/7, 1/6) ~25€</option>
             <option value="large">Большой (Scale 1/4, диорама) ~50€</option>
           </select>
         </div>
         <div class="form-group">
-          <div class="form-label">Дата выхода</div>
+          <div class="form-label" data-i18n="form.releaseDate">Дата выхода</div>
           <div style="display:flex;gap:8px;">
             <select id="fDateMonth"
               style="flex:1;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;">
-              <option value="">— месяц —</option>
+              <option value="" data-i18n="form.monthPlaceholder">— месяц —</option>
               <option>Январь</option>
               <option>Февраль</option>
               <option>Март</option>
@@ -455,16 +480,16 @@
           </div>
         </div>
         <div class="form-group full">
-          <div class="form-label">Ссылка на картинку / Загрузить на Диск</div>
+          <div class="form-label" data-i18n="form.image">Ссылка на картинку / Загрузить на Диск</div>
           <div style="display:flex; gap:8px;">
             <input id="fImg" placeholder="https://..." style="flex:1;" />
             <button type="button" class="btn btn-sm" onclick="document.getElementById('fImgFile').click()">📤
               Загрузить</button>
-            <input type="file" id="fImgFile" accept="image/*" style="display:none;" />
+            <input type="file" id="fImgFile" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" style="display:none;" />
           </div>
         </div>
         <div class="form-group full">
-          <div class="form-label">Ссылка на страницу товара</div>
+          <div class="form-label" data-i18n="form.productUrl">Ссылка на страницу товара</div>
           <div style="display:flex; gap:8px;">
             <input id="fShopUrl" placeholder="https://www.amiami.com/..." type="url" style="flex:1;" />
             <button type="button" class="btn btn-sm" id="btnAutofillMain" onclick="grabFromTampermonkey('main')">🔍
@@ -472,7 +497,7 @@
           </div>
         </div>
         <div class="form-group full">
-          <div class="form-label">Цена товара</div>
+          <div class="form-label" data-i18n="form.price">Цена товара</div>
           <div class="price-row">
             <div class="form-group">
               <input id="fPrice" type="number" step="0.01" placeholder="11430" oninput="updateEurPreview()" />
@@ -488,9 +513,9 @@
           <div class="eur-preview" id="eurPreview"></div>
         </div>
         <div class="form-group">
-          <div class="form-label">Доставка EUR (весь заказ)</div>
+          <div class="form-label" data-i18n="form.shipping">Доставка EUR (весь заказ)</div>
           <div style="display:flex;gap:8px;align-items:center;">
-            <input id="fShipping" type="number" step="0.01" placeholder="авто"
+            <input id="fShipping" type="number" step="0.01" placeholder="авто" data-i18n-placeholder="form.shippingHint"
               style="flex:2;min-width:0;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;" />
             <select id="fShipMethod"
               style="flex:2;min-width:0;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;">
@@ -501,21 +526,21 @@
             <button type="button" class="btn btn-sm" onclick="estimateShipping()"
               title="Рассчитать по типу фигурки">🧮</button>
           </div>
-          <div class="eur-preview" style="color:var(--muted)">Общая на весь заказ</div>
+          <div class="eur-preview" style="color:var(--muted)" data-i18n="form.shippingHint">Общая на весь заказ</div>
         </div>
         <div class="form-group">
-          <div class="form-label">Предоплата EUR (весь заказ)</div>
+          <div class="form-label" data-i18n="form.deposit">Предоплата EUR (весь заказ)</div>
           <input id="fDeposit" type="number" step="0.01" placeholder="0.00" />
         </div>
         <div class="form-group full">
 
-          <div class="form-label">Теги / серии (через запятую)</div>
+          <div class="form-label" data-i18n="form.tags">Теги / серии (через запятую)</div>
           <input id="fTags" placeholder="Hololive, Nendo, Prize...">
           <div id="tagSuggestions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
         </div>
       </div>
       <div class="form-group full">
-        <div class="form-label">Статус оплаты</div>
+        <div class="form-label" data-i18n="form.paymentStatus">Статус оплаты</div>
         <select id="fStatus">
           <option>Не оплачено</option>
           <option>Депозит оплачен</option>
@@ -602,39 +627,39 @@
   <div class="form-overlay" id="wishFormOverlay" style="display:none">
     <div class="form-panel">
       <div class="form-title">
-        <span id="wishFormTitle">Добавить в вишлист</span>
+        <span id="wishFormTitle" data-i18n="wish.formTitle">Добавить в вишлист</span>
         <button class="btn btn-icon" onclick="closeWishForm()">✕</button>
       </div>
       <div class="form-grid">
         <div class="form-group full">
-          <div class="form-label">Название *</div><input id="wName" placeholder="Hatsune Miku Sunset Ver." />
+          <div class="form-label" data-i18n="wish.name">Название *</div><input id="wName" placeholder="Hatsune Miku Sunset Ver." />
         </div>
         <div class="form-group">
-          <div class="form-label">Магазин</div><input id="wStore" placeholder="AmiAmi" />
+          <div class="form-label" data-i18n="settings.store">Магазин</div><input id="wStore" placeholder="AmiAmi" />
         </div>
         <div class="form-group">
-          <div class="form-label">Производитель</div><input id="wMaker" placeholder="GSC" />
+          <div class="form-label" data-i18n="form.maker">Производитель</div><input id="wMaker" placeholder="GSC" />
         </div>
         <div class="form-group">
-          <div class="form-label">Ожидаемая цена</div><input id="wPrice" type="number" placeholder="15000" />
+          <div class="form-label" data-i18n="wish.expectedPrice">Ожидаемая цена</div><input id="wPrice" type="number" placeholder="15000" />
         </div>
         <div class="form-group">
-          <div class="form-label">Валюта</div><select id="wCurrency">
+          <div class="form-label" data-i18n="settings.currency">Валюта</div><select id="wCurrency">
             <option value="JPY" selected>JPY</option>
             <option value="USD">USD</option>
             <option value="EUR">EUR</option>
           </select>
         </div>
         <div class="form-group">
-          <div class="form-label">Дата выхода</div><input id="wDate" placeholder="2027" />
+          <div class="form-label" data-i18n="form.releaseDate">Дата выхода</div><input id="wDate" placeholder="2027" />
         </div>
         <div class="form-group full">
-          <div class="form-label">Ссылка на картинку</div><textarea id="wImg"
+          <div class="form-label" data-i18n="wish.image">Ссылка на картинку</div><textarea id="wImg"
             placeholder="https://img.amiami.com/1.jpg, https://img.amiami.com/2.jpg"
             style="width:100%;min-height:60px;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
         </div>
         <div class="form-group full">
-          <div class="form-label">Ссылка на страницу товара</div>
+          <div class="form-label" data-i18n="form.productUrl">Ссылка на страницу товара</div>
           <div style="display:flex; gap:8px;">
             <input id="wShopUrl" placeholder="https://www.amiami.com/eng/detail/?gcode=..." type="url"
               style="flex:1;" />
@@ -643,20 +668,20 @@
           </div>
         </div>
         <div class="form-group full">
-          <div class="form-label">Заметки</div><textarea id="wNotes" placeholder="Хочу на день рождения..."></textarea>
+          <div class="form-label" data-i18n="wish.notes">Заметки</div><textarea id="wNotes" placeholder="Хочу на день рождения..."></textarea>
         </div>
         <div class="form-group full">
-          <div class="form-label">Приоритет</div>
+          <div class="form-label" data-i18n="wish.priority">Приоритет</div>
           <select id="wPriority">
-            <option value="high">🔥 Высокий — куплю точно</option>
-            <option value="mid" selected>⭐ Средний — хочу но не срочно</option>
-            <option value="low">💭 Низкий — если найду дёшево</option>
+            <option value="high" data-i18n="wish.priorityHighFull">🔥 Высокий — куплю точно</option>
+            <option value="mid" selected data-i18n="wish.priorityMidFull">⭐ Средний — хочу но не срочно</option>
+            <option value="low" data-i18n="wish.priorityLowFull">💭 Низкий — если найду дёшево</option>
           </select>
         </div>
       </div>
       <div class="form-actions">
-        <button class="btn btn-primary" onclick="saveWish()">Сохранить</button>
-        <button class="btn" onclick="closeWishForm()">Отмена</button>
+        <button class="btn btn-primary" onclick="saveWish()" data-i18n="common.save">Сохранить</button>
+        <button class="btn" onclick="closeWishForm()" data-i18n="common.cancel">Отмена</button>
       </div>
     </div>
 
@@ -667,4 +692,9 @@
 </body>
 
 </html>
+
+
+
+
+
 

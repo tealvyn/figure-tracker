@@ -1,11 +1,29 @@
 // js/api.js
 import { state, persist, appState } from './state.js';
-import * as UI from './ui.js';
+import { toast } from './notifications.js';
+
+const apiCallbacks = {
+  render: null,
+  showRatesBadge: null,
+  updateEurPreview: null
+};
+
+export function configureApiCallbacks(callbacks = {}) {
+  Object.assign(apiCallbacks, callbacks);
+}
+
+function callCallback(name, ...args) {
+  const fn = apiCallbacks[name];
+  if (typeof fn === 'function') {
+    return fn(...args);
+  }
+  return undefined;
+}
 
 export async function fetchRates(force = false) {
   const badge = document.getElementById('ratesBadge');
   const age = Date.now() - (state.ratesAt || 0);
-  if (!force && age < 4 * 3600 * 1000 && state.rates.JPY) { UI.showRatesBadge(); return; }
+  if (!force && age < 4 * 3600 * 1000 && state.rates.JPY) { callCallback('showRatesBadge'); return; }
   
   if (badge) {
     badge.className = 'rates-badge loading'; 
@@ -22,9 +40,9 @@ export async function fetchRates(force = false) {
     state.rates = { EUR: 1, USD: +(usdData.usd.eur).toFixed(6), JPY: +(jpyData.jpy.eur).toFixed(6) };
     state.ratesAt = Date.now(); 
     persist(); 
-    UI.showRatesBadge(); 
-    UI.toast('Курсы обновлены'); 
-    UI.updateEurPreview();
+    callCallback('showRatesBadge'); 
+    toast('Курсы обновлены'); 
+    callCallback('updateEurPreview');
   } catch { 
     if (badge) {
       badge.className = 'rates-badge stale';
@@ -36,7 +54,7 @@ export async function fetchRates(force = false) {
 export async function backupToDrive(silent = false) {
   const SCRIPT_URL = state.settings?.scriptUrl;
   if (!SCRIPT_URL) {
-    if (!silent) UI.toast('❌ Сначала укажите ссылку на Google Script в Настройках!');
+    if (!silent) toast('❌ Сначала укажите ссылку на Google Script в Настройках!');
     return;
   }
 
@@ -62,7 +80,7 @@ export async function backupToDrive(silent = false) {
         if (badge) { badge.textContent = 'Google Drive'; badge.disabled = false; }
         if (btn2) { btn2.textContent = '☁️ Сохранить'; btn2.disabled = false; }
       }, 2000);
-      UI.toast(data.ok ? '✅ Сохранено в Google Drive: ' + data.filename : '❌ Ошибка: ' + data.error);
+      toast(data.ok ? '✅ Сохранено в Google Drive: ' + data.filename : '❌ Ошибка: ' + data.error);
     }
 
     if (silent && data.ok && autoBackupBar) {
@@ -74,7 +92,7 @@ export async function backupToDrive(silent = false) {
       [badge, btn2].forEach(b => {
         if (b) { b.textContent = '❌ Ошибка'; b.disabled = false; }
       });
-      UI.toast('❌ Не удалось подключиться к Google Drive');
+      toast('❌ Не удалось подключиться к Google Drive');
     }
     if (silent && autoBackupBar) {
       autoBackupBar.innerHTML = '<span style="color:var(--red)">●</span> Нет соединения с Google Drive';
@@ -85,7 +103,7 @@ export async function backupToDrive(silent = false) {
 export async function loadFromDrive() {
   const SCRIPT_URL = state.settings?.scriptUrl;
   if (!SCRIPT_URL) {
-    UI.toast('❌ Сначала укажите ссылку на Google Script в Настройках!');
+    toast('❌ Сначала укажите ссылку на Google Script в Настройках!');
     return;
   }
   const btn = document.getElementById('loadDriveBtn');
@@ -93,7 +111,7 @@ export async function loadFromDrive() {
   try {
     const res = await fetch(SCRIPT_URL);
     const data = await res.json();
-    if (!data.ok) { UI.toast('❌ ' + (data.error || 'Ошибка Drive')); return; }
+    if (!data.ok) { toast('❌ ' + (data.error || 'Ошибка Drive')); return; }
 
     const driveCount = data.state?.items?.length || 0;
     const localCount = state.items?.length || 0;
@@ -103,10 +121,10 @@ export async function loadFromDrive() {
     Object.assign(state, data.state);
     appState.selectedOrder = null;
     persist();
-    UI.render();
-    UI.toast(`☁️ Загружено с Drive: ${driveCount} фигурок`);
+    callCallback('render');
+    toast(`☁️ Загружено с Drive: ${driveCount} фигурок`);
   } catch {
-    UI.toast('❌ Не удалось подключиться к Drive');
+    toast('❌ Не удалось подключиться к Drive');
   } finally {
     if (btn) { btn.textContent = '☁️ Загрузить с Drive'; btn.disabled = false; }
   }

@@ -5,6 +5,29 @@ export function H(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); 
 }
 
+function isVideoUrl(url = '') {
+  return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(String(url));
+}
+
+function mediaTag(url, className = 'figure-img', alt = '') {
+  if (!url) {
+    return `<div class="${className}" style="display:flex;align-items:center;justify-content:center;font-size:36px;">📦</div>`;
+  }
+
+  const safeUrl = H(url);
+  const safeAlt = H(alt);
+
+  if (isVideoUrl(url)) {
+    return `
+      <video class="${className}" controls preload="metadata" playsinline onclick="event.stopPropagation()">
+        <source src="${safeUrl}">
+      </video>
+    `;
+  }
+
+  return `<img class="${className}" src="${safeUrl}" alt="${safeAlt}" onerror="this.style.opacity='.1'">`;
+}
+
 export function eur(n) { 
   return '€' + Number(n || 0).toFixed(2); 
 }

@@ -1,4 +1,4 @@
-﻿const CACHE_VERSION = 'figure-tracker-v1';
+﻿const CACHE_VERSION = 'figure-tracker-v7';
 const APP_SHELL = [
   './',
   './index.html',
@@ -6,12 +6,19 @@ const APP_SHELL = [
   './manifest.json',
   './js/api.js',
   './js/main.js',
+  './js/i18n.js',
   './js/state.js',
   './js/ui.js',
   './js/utils.js',
-  './icons/icon.svg',
+  './icons/favicon.ico',
+  './icons/icon-16.png',
+  './icons/icon-32.png',
+  './icons/icon-48.png',
+  './icons/icon-180.png',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './icons/maskable-192.png',
+  './icons/maskable-512.png'
 ];
 
 const OPTIONAL_ASSETS = [
@@ -67,3 +74,11 @@ self.addEventListener('fetch', event => {
     })());
   }
 });
+
+
+
+
+
+
+
+
