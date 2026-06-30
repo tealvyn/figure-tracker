@@ -23,6 +23,161 @@ const GALLERY_PAGE_SIZE = 120;
 const renderQueue = new Map();
 let renderScheduled = false;
 const mediaLookup = new Map();
+const STANDALONE_TABS = new Set(['gallery', 'calendar', 'analytics', 'shelf', 'settings']);
+
+function isMobileViewport() {
+  return window.matchMedia('(max-width: 768px)').matches;
+}
+
+function isDisplayed(id) {
+  const el = document.getElementById(id);
+  return Boolean(el && el.style.display !== 'none' && !el.hidden);
+}
+
+function pushUiHistory(kind) {
+  if (!window.history?.pushState || appState.historyLayer === kind) return;
+  history.pushState({ figureTrackerLayer: kind }, '');
+  appState.historyLayer = kind;
+}
+
+function updateGlobalSearchDropdownTop() {
+  const input = document.getElementById('globalSearchInput');
+  if (!input) return;
+  const rect = input.getBoundingClientRect();
+  document.documentElement.style.setProperty('--global-search-dropdown-top', `${Math.round(rect.bottom + 6)}px`);
+}
+
+export function stopMediaEvent(event) {
+  event?.stopPropagation();
+}
+
+export function isCardOpenBlocked(event) {
+  return Boolean(event?.target?.closest(
+    'video, audio, button, a, input, select, textarea, [data-no-card-open], .media-video-preview, .media-video-toggle, .media-video-sound, .media-open-btn, .lightbox-arrow, .lightbox-close'
+  ));
+}
+
+export function pauseAllVideosExcept(exceptVideo = null) {
+  document.querySelectorAll('video').forEach(video => {
+    if (video !== exceptVideo && !video.paused) video.pause();
+  });
+}
+
+export function syncPreviewVideoToggle(video) {
+  const wrapper = video?.closest?.('.media-video-preview');
+  if (!wrapper) return;
+  const isPlaying = Boolean(video && !video.paused && !video.ended);
+  wrapper.classList.toggle('is-playing', isPlaying);
+  const btn = wrapper.querySelector('.media-video-toggle');
+  if (btn) {
+    btn.textContent = isPlaying ? '∎' : '▶';
+    btn.setAttribute('aria-label', isPlaying ? t('video.pause') : t('video.play'));
+  }
+  const soundBtn = wrapper.querySelector('.media-video-sound');
+  if (soundBtn) {
+    soundBtn.textContent = video.muted ? '🔇' : '🔊';
+    soundBtn.setAttribute('aria-label', video.muted ? t('video.soundOn') : t('video.soundOff'));
+  }
+}
+
+export function togglePreviewVideoSound(event) {
+  stopMediaEvent(event);
+  const wrapper = event?.currentTarget?.closest?.('.media-video-preview')
+    || event?.target?.closest?.('.media-video-preview');
+  const video = wrapper?.querySelector('video');
+  if (!video) return;
+
+  video.muted = !video.muted;
+  video.volume = video.muted ? 0 : 1;
+  syncPreviewVideoToggle(video);
+}
+
+export function ensurePreviewVideoControls(root = document) {
+  root.querySelectorAll?.('.media-video-preview').forEach(wrapper => {
+    const video = wrapper.querySelector('video');
+    if (!video) return;
+    if (!wrapper.querySelector('.media-video-sound')) {
+      const btn = document.createElement('button');
+      btn.className = 'media-video-sound';
+      btn.type = 'button';
+      btn.setAttribute('aria-label', t('video.soundOn'));
+      btn.onclick = togglePreviewVideoSound;
+      btn.onpointerdown = stopMediaEvent;
+      btn.ontouchstart = stopMediaEvent;
+      wrapper.appendChild(btn);
+    }
+    syncPreviewVideoToggle(video);
+  });
+}
+
+export function initPreviewVideoControlsObserver() {
+  if (appState.previewVideoControlsObserver) return;
+  appState.previewVideoControlsObserver = true;
+  const observer = new MutationObserver(() => {
+    requestAnimationFrame(() => ensurePreviewVideoControls(document));
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  ensurePreviewVideoControls(document);
+}
+
+export function togglePreviewVideo(event) {
+  stopMediaEvent(event);
+  const wrapper = event?.currentTarget?.closest?.('.media-video-preview')
+    || event?.target?.closest?.('.media-video-preview');
+  const video = wrapper?.querySelector('video');
+  if (!video) return;
+
+  if (video.paused || video.ended) {
+    pauseAllVideosExcept(video);
+    video.play?.().catch(() => null);
+  } else {
+    video.pause();
+  }
+  syncPreviewVideoToggle(video);
+}
+
+export function closeTopHistoryLayer() {
+  appState.historyLayer = null;
+
+  if (!document.getElementById('globalSearchResults')?.hidden) {
+    hideGlobalSearchResults();
+    return true;
+  }
+  if (isDisplayed('lightboxOverlay')) {
+    closeLightbox();
+    return true;
+  }
+  if (isDisplayed('modalOverlay')) {
+    closeModal();
+    return true;
+  }
+  if (isDisplayed('formOverlay')) {
+    closeForm();
+    return true;
+  }
+  if (isDisplayed('wishFormOverlay')) {
+    closeWishForm();
+    return true;
+  }
+  if (STANDALONE_TABS.has(appState.currentTab)) {
+    appState.standaloneTabHistory = false;
+    switchTab('collection');
+    return true;
+  }
+  if (isMobileViewport() && appState.currentTab === 'collection' && appState.selectedOrder) {
+    backToOrders();
+    return true;
+  }
+  return false;
+}
+
+export function bindHistoryBackHandling() {
+  if (appState.historyBackBound) return;
+  appState.historyBackBound = true;
+  window.addEventListener('popstate', () => {
+    closeTopHistoryLayer();
+  });
+}
 
 function getTelegramSettings() {
   return {
@@ -256,7 +411,7 @@ export function renderGlobalSearchCounts() {
   const query = String(state.search?.global || '').trim();
   if (!query) { box.textContent = ''; return; }
   const counts = getGlobalSearchCounts();
-  box.textContent = `Найдено: ${counts.total} · Коллекция: ${counts.collection} · Вишлист: ${counts.wishlist}`;
+  box.textContent = t('globalSearch.counts', counts);
 }
 
 function globalSearchTextOf(item = {}, type = 'collection') {
@@ -318,6 +473,7 @@ export function hideGlobalSearchResults() {
   box.hidden = true;
   box.innerHTML = '';
   appState.globalSearchResults = [];
+  if (appState.historyLayer === 'search') appState.historyLayer = null;
 }
 
 export function renderGlobalSearchResults() {
@@ -335,7 +491,7 @@ export function renderGlobalSearchResults() {
     const item = result.item || {};
     const isWish = result.type === 'wishlist';
     const thumb = globalSearchThumb(item);
-    const badge = isWish ? '⭐ Вишлист' : '📦 Коллекция';
+    const badge = isWish ? t('globalSearch.wishlist') : t('globalSearch.collection');
     const meta = isWish
       ? [item.priority, item.manufacturer, item.store].filter(Boolean).join(' · ')
       : [item.orderNumber || item.orderName, item.status, item.store].filter(Boolean).join(' · ');
@@ -348,6 +504,8 @@ export function renderGlobalSearchResults() {
       </span>
     </button>`;
   }).join('');
+  updateGlobalSearchDropdownTop();
+  if (box.hidden) pushUiHistory('search');
   box.hidden = false;
 }
 
@@ -424,27 +582,27 @@ export function createLocalBackup(reason = 'manual', silent = false) {
   const backups = [backup, ...getLocalBackups()].slice(0, LOCAL_BACKUPS_LIMIT);
   localStorage.setItem(LOCAL_BACKUPS_KEY, JSON.stringify(backups));
   renderLocalBackups();
-  if (!silent) toast('Локальная копия сохранена');
+  if (!silent) toast(t('toast.localBackupSaved'));
   return backup;
 }
 
 export function restoreLocalBackup(id) {
   const backup = getLocalBackups().find(b => b.id === id);
-  if (!backup?.state) return toast('Копия не найдена');
-  if (!confirm('Восстановить эту локальную копию? Текущие данные будут заменены.')) return;
+  if (!backup?.state) return toast(t('toast.localBackupMissing'));
+  if (!confirm(t('confirm.restoreLocalBackup'))) return;
   Object.keys(state).forEach(key => delete state[key]);
   Object.assign(state, JSON.parse(JSON.stringify(backup.state)));
   appState.selectedOrder = null;
   persist();
   render();
-  toast('Локальная копия восстановлена');
+  toast(t('toast.localBackupRestored'));
 }
 
 export function deleteLocalBackup(id) {
   const backups = getLocalBackups().filter(b => b.id !== id);
   localStorage.setItem(LOCAL_BACKUPS_KEY, JSON.stringify(backups));
   renderLocalBackups();
-  toast('Копия удалена');
+  toast(t('toast.localBackupDeleted'));
 }
 
 
@@ -497,9 +655,9 @@ export function maybeRestoreItemDraft() {
   const draft = readItemDraft();
   if (!draft || !hasItemDraftSignal(draft.values)) return;
   const when = new Date(draft.updatedAt || Date.now()).toLocaleString('ru');
-  if (confirm(`Есть несохранённый черновик от ${when}. Восстановить?`)) {
+  if (confirm(t('confirm.restoreDraft', { when }))) {
     applyItemDraft(draft);
-    toast('Черновик восстановлен');
+    toast(t('toast.draftRestored'));
   } else {
     clearItemDraft();
   }
@@ -517,16 +675,16 @@ export function renderLocalBackups() {
   if (!box) return;
   const backups = getLocalBackups();
   if (!backups.length) {
-    box.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0;">Локальных копий пока нет</div>';
+    box.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:8px 0;">${t('localBackup.empty')}</div>`;
     return;
   }
-  const labels = { manual: 'Вручную', 'before-import': 'Перед импортом', 'before-clear': 'Перед очисткой', 'before-delete-item': 'Перед удалением фигурки', 'before-delete-wish': 'Перед удалением желания' };
+  const labels = { manual: t('localBackup.reason.manual'), 'before-import': t('localBackup.reason.beforeImport'), 'before-clear': t('localBackup.reason.beforeClear'), 'before-delete-item': t('localBackup.reason.beforeDeleteItem'), 'before-delete-wish': t('localBackup.reason.beforeDeleteWish') };
   box.innerHTML = backups.map(b => {
     const date = new Date(b.createdAt).toLocaleString('ru');
     const items = b.state?.items?.length || 0;
     const wishes = b.state?.wishlist?.length || 0;
-    const label = labels[b.reason] || b.reason || 'Копия';
-    return `<div class="local-backup-row"><div><div class="local-backup-title">${H(label)} · ${H(date)}</div><div class="local-backup-meta">${items} фигурок · ${wishes} в вишлисте</div></div><div class="local-backup-actions"><button class="btn btn-sm" onclick="restoreLocalBackup('${H(b.id)}')">Восстановить</button><button class="btn btn-sm btn-danger" onclick="deleteLocalBackup('${H(b.id)}')">Удалить</button></div></div>`;
+    const label = labels[b.reason] || b.reason || t('localBackup.fallback');
+    return `<div class="local-backup-row"><div><div class="local-backup-title">${H(label)} · ${H(date)}</div><div class="local-backup-meta">${t('localBackup.meta', { items, wishes })}</div></div><div class="local-backup-actions"><button class="btn btn-sm" onclick="restoreLocalBackup('${H(b.id)}')">${t('common.restore')}</button><button class="btn btn-sm btn-danger" onclick="deleteLocalBackup('${H(b.id)}')">${t('common.delete')}</button></div></div>`;
   }).join('');
 }
 
@@ -542,7 +700,7 @@ export function updateEurPreview() {
 
 export function estimateShipping() {
   const scale = document.getElementById('fScale').value;
-  if (!scale) { toast('Сначала выбери тип фигурки'); return; }
+  if (!scale) { toast(t('toast.selectFigureType')); return; }
 
   const orderNumber = document.getElementById('fOrder').value.trim();
   const store = document.getElementById('fStore').value.trim().toLowerCase();
@@ -697,8 +855,15 @@ export function syncMobileCollectionView() {
   mainPane?.classList.toggle('mobile-detail-mode', hasSelectedOrder);
 }
 
+function ensureMobileDetailHistory() {
+  if (!isMobileViewport() || appState.currentTab !== 'collection' || !appState.selectedOrder || appState.mobileDetailHistory) return;
+  pushUiHistory('detail');
+  appState.mobileDetailHistory = true;
+}
+
 export function backToOrders() {
   appState.selectedOrder = null;
+  appState.mobileDetailHistory = false;
   closeFilters();
   render();
 }
@@ -710,6 +875,7 @@ export function updateWishlistBadge() {
 export function renderDetail() {
   const pane = document.getElementById('detailPane');
   if (!pane) return;
+  ensureMobileDetailHistory();
   syncMobileCollectionView();
   if (!appState.selectedOrder) {
     const orders = getFiltered();
@@ -736,7 +902,7 @@ export function renderDetail() {
     const item = normalizeProductMeta(rawItem);
     const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
     const firstMedia = mediaEntriesOf(item)[0]?.media || item.imageUrl || item.img || item.videoUrl;
-    return `<div class="figure-card animate-in" style="animation-delay:${itemIndex * 40}ms" onclick="openModal('${H(item.id)}')">
+    return `<div class="figure-card animate-in" style="animation-delay:${itemIndex * 40}ms" onclick="if(isCardOpenBlocked(event))return;openModal('${H(item.id)}')">
   ${renderMediaTag(firstMedia, 'figure-img', item.name)}
   <div class="figure-body">
     <div class="figure-name">${H(item.name)}</div>
@@ -803,6 +969,7 @@ export function renderDetail() {
   </div>
 </div>
 `;
+  ensurePreviewVideoControls(pane);
 }
 
 export function openForm(options = {}) {
@@ -813,6 +980,7 @@ export function openForm(options = {}) {
   const dl = document.getElementById('orderSuggestions');
   dl.innerHTML = orders.map(o => `<option value="${H(o.orderNumber)}">${H(o.orderName)}</option>`).join('');
   document.getElementById('formOverlay').style.display = 'flex';
+  pushUiHistory('form');
   renderTagSuggestions();
   if (!options.skipDraft) maybeRestoreItemDraft();
 }
@@ -821,6 +989,7 @@ export function closeForm() {
   stopMedia(document.getElementById('formOverlay'), { resetSrc: false });
   document.getElementById('formOverlay').style.display = 'none';
   appState.editingId = null;
+  if (appState.historyLayer === 'form') appState.historyLayer = null;
   clearForm();
 }
 
@@ -898,12 +1067,12 @@ export function editItem(id) {
 }
 
 export function deleteItem(id) {
-  if (!confirm('Удалить эту фигурку?')) return;
+  if (!confirm(t('confirm.deleteItem'))) return;
   createLocalBackup('before-delete-item', true);
   state.items = state.items.filter(i => i.id !== id);
   syncGlobalTags();
   if (!getOrders().find(o => o.orderNumber === appState.selectedOrder)) appState.selectedOrder = null;
-  persist(); render(); toast('Удалено');
+  persist(); render(); toast(t('toast.deleted'));
 }
 
 function mergeMediaByUrl(...lists) {
@@ -937,8 +1106,8 @@ function mediaUrlSet(mediaList = []) {
 export function saveItem() {
   const name = document.getElementById('fName').value.trim();
   const orderNumber = document.getElementById('fOrder').value.trim();
-  if (!name) { alert('Укажи название фигурки'); return; }
-  if (!orderNumber) { alert('Укажи номер заказа'); return; }
+  if (!name) { alert(t('alert.itemNameRequired')); return; }
+  if (!orderNumber) { alert(t('alert.orderNumberRequired')); return; }
   const existingItem = appState.editingId ? state.items.find(i => i.id === appState.editingId) : null;
   const uploadedMedia = appState.pendingUploadedMedia || [];
   const media = mergeMediaByUrl(
@@ -995,7 +1164,7 @@ export function saveItem() {
   appState.selectedOrder = orderNumber;
   appState.pendingUploadedMedia = [];
   if (!wasEditing) clearItemDraft();
-  closeForm(); persist(); render(); toast(wasEditing ? 'Сохранено' : 'Фигурка добавлена!');
+  closeForm(); persist(); render(); toast(wasEditing ? t('toast.saved') : t('toast.itemAdded'));
 }
 
 export function loadSettings() {
@@ -1013,7 +1182,12 @@ export function loadSettings() {
 
   const orders = getOrders();
   const received = state.items.filter(i => i.status === 'Получено').length;
-  document.getElementById('settingsStats').innerHTML = `${state.items.length} фигурок · ${orders.length} заказов · ${received} получено · ${state.wishlist?.length || 0} в вишлисте`;
+  document.getElementById('settingsStats').innerHTML = t('settings.statsLine', {
+    items: state.items.length,
+    orders: orders.length,
+    received,
+    wishlist: state.wishlist?.length || 0
+  });
   renderLocalBackups();
 }
 
@@ -1037,24 +1211,24 @@ export function saveSettings() {
 }
 
 export function clearAllData() {
-  if (!confirm('Удалить ВСЕ данные? Это действие нельзя отменить!')) return;
-  if (!confirm('Ты уверен? Все фигурки и вишлист будут удалены.')) return;
+  if (!confirm(t('confirm.clearAll'))) return;
+  if (!confirm(t('confirm.clearAllAgain'))) return;
   createLocalBackup('before-clear', true);
   state.items = []; state.wishlist = [];
   syncGlobalTags();
   appState.selectedOrder = null;
-  persist(); render(); toast('🗑️ Все данные удалены');
+  persist(); render(); toast(t('toast.allDataDeleted'));
 }
 
 export function exportData() {
   downloadJsonBackup(state);
-  toast('\uD83D\uDCE4 \u0411\u0435\u043A\u0430\u043F \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D');
+  toast(t('toast.backupSaved'));
 }
 
 export function toggleOrderHidden(orderNumber) {
   state.items.forEach(i => { if (i.orderNumber === orderNumber) i.hidden = !i.hidden; });
   persist(); render();
-  toast(state.items.find(i => i.orderNumber === orderNumber)?.hidden ? '🙈 Заказ скрыт' : '👁️ Заказ показан');
+  toast(state.items.find(i => i.orderNumber === orderNumber)?.hidden ? t('toast.orderHidden') : t('toast.orderShown'));
 }
 
 export function updateSuggestions() {
@@ -1197,12 +1371,12 @@ export function renderAnalytics() {
 
 export function payWholeOrder(orderNumber) {
   state.items.forEach(i => { if (i.orderNumber === orderNumber) i.status = 'Полностью оплачено'; });
-  persist(); render(); toast('Заказ полностью оплачен ✅');
+  persist(); render(); toast(t('toast.orderPaid'));
 }
 
 export function receiveWholeOrder(orderNumber) {
   state.items.forEach(i => { if (i.orderNumber === orderNumber) i.status = 'Получено'; });
-  persist(); render(); renderShelf(); toast('✅ Весь заказ получен! Фигурки добавлены на полку 🗂️');
+  persist(); render(); renderShelf(); toast(t('toast.orderReceived'));
 }
 
 export function renderTagSuggestions() {
@@ -1283,7 +1457,7 @@ const grid = document.getElementById('galleryGrid');
 if (!grid) return;
 
 if (!items.length) {
-  grid.innerHTML = '<div style="color:var(--muted);text-align:center;padding:60px 0;">Ничего не найдено</div>';
+  grid.innerHTML = `<div style="color:var(--muted);text-align:center;padding:60px 0;">${t('gallery.empty')}</div>`;
   return;
 }
 
@@ -1298,7 +1472,7 @@ grid.innerHTML = items.map((item, idx) => {
 
   if (imgs.length === 0) {
     renderedMediaCount += 1;
-    return `<div class="gallery-card animate-in" style="animation-delay:${idx * 20}ms; position: relative; aspect-ratio: 1;" onclick="openModal('${H(item.id)}')">
+    return `<div class="gallery-card animate-in" style="animation-delay:${idx * 20}ms; position: relative; aspect-ratio: 1;" onclick="if(isCardOpenBlocked(event))return;openModal('${H(item.id)}')">
       <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:40px; opacity:0.3; background:#111;">📦</div>
       <div class="gallery-overlay">
         <div class="gallery-name">${H(item.name)}</div>
@@ -1314,21 +1488,21 @@ grid.innerHTML = items.map((item, idx) => {
     const kind = img.kind;
     const mediaUrl = img.url;
     const mediaTag = renderMediaTag(img.media, 'gallery-media', item.name)
-      .replace('class="gallery-media"', `class="gallery-media" data-media-url="${H(mediaUrl)}"`);
+      .replace(/class="([^"]*gallery-media[^"]*)"/, `class="$1" data-media-url="${H(mediaUrl)}"`);
 
     const mediaHtml = kind === 'animation'
-      ? `<div class="gallery-video-wrap">
+      ? `<div class="gallery-video-wrap" data-no-card-open="true">
           ${mediaTag}
-          <button class="icon-action-btn media-open-btn" type="button" title="Открыть" onclick="event.stopPropagation(); openLightbox('${H(mediaUrl)}', 'gallery')">⛶</button>
+          <button class="icon-action-btn media-open-btn" type="button" title="${t('common.open')}" onclick="event.stopPropagation(); openItemLightbox('collection', '${H(item.id)}', '${H(mediaUrl)}', ${imgIdx}, this.closest('.gallery-video-wrap')?.querySelector('video'))">⛶</button>
         </div>`
       : kind === 'video'
-        ? `<div class="gallery-video-wrap">
+        ? `<div class="gallery-video-wrap" data-no-card-open="true">
             ${mediaTag}
-            <button class="icon-action-btn media-open-btn" type="button" title="Открыть" onclick="event.stopPropagation(); openLightbox('${H(mediaUrl)}', 'gallery')">⛶</button>
+            <button class="icon-action-btn media-open-btn" type="button" title="${t('common.open')}" onclick="event.stopPropagation(); openItemLightbox('collection', '${H(item.id)}', '${H(mediaUrl)}', ${imgIdx}, this.closest('.gallery-video-wrap')?.querySelector('video'))">⛶</button>
           </div>`
-        : `<img class="gallery-media zoomable" data-media-url="${H(mediaUrl)}" src="${H(mediaUrl)}" loading="lazy" alt="${H(item.name)}" data-provider="${H(img.media?.provider || '')}" data-file-id="${H(img.media?.fileId || '')}" data-media-type="${H(img.media?.mediaType || '')}" onerror="handleMediaLoadError(this)" onclick="event.stopPropagation(); openLightbox('${H(mediaUrl)}', 'gallery')">`;
+        : `<img class="gallery-media zoomable" data-media-url="${H(mediaUrl)}" src="${H(mediaUrl)}" loading="lazy" alt="${H(item.name)}" data-provider="${H(img.media?.provider || '')}" data-file-id="${H(img.media?.fileId || '')}" data-media-type="${H(img.media?.mediaType || '')}" onerror="handleMediaLoadError(this)" onclick="event.stopPropagation(); openItemLightbox('collection', '${H(item.id)}', '${H(mediaUrl)}', ${imgIdx})">`;
 
-    return `<div class="gallery-card animate-in" style="animation-delay:${(idx + imgIdx) * 20}ms; position: relative; align-self: start;" onclick="openModal('${H(item.id)}')">
+    return `<div class="gallery-card animate-in" style="animation-delay:${(idx + imgIdx) * 20}ms; position: relative; align-self: start;" onclick="if(isCardOpenBlocked(event))return;openModal('${H(item.id)}')">
       ${mediaHtml}
       <div class="gallery-overlay">
         <div class="gallery-name">${H(item.name)} ${imgs.length > 1 ? `<span style="font-size:11px;opacity:0.7">(${imgIdx + 1}/${imgs.length})</span>` : ''}</div>
@@ -1340,9 +1514,10 @@ grid.innerHTML = items.map((item, idx) => {
 
 if (renderedMediaCount < totalMediaCount) {
   grid.innerHTML += `<div style="break-inside:avoid;display:flex;justify-content:center;padding:18px 0 30px;">
-    <button type="button" class="btn btn-primary btn-sm" onclick="showMoreGallery()">Показать ещё (${Math.min(GALLERY_PAGE_SIZE, totalMediaCount - renderedMediaCount)} из ${totalMediaCount - renderedMediaCount})</button>
+    <button type="button" class="btn btn-primary btn-sm" onclick="showMoreGallery()">${t('gallery.showMore', { count: Math.min(GALLERY_PAGE_SIZE, totalMediaCount - renderedMediaCount), total: totalMediaCount - renderedMediaCount })}</button>
   </div>`;
 }
+ensurePreviewVideoControls(grid);
 }
 
 export function showMoreGallery() {
@@ -1403,8 +1578,16 @@ export function getFactByTime() {
   return facts[Math.floor(Date.now() / 60000) % facts.length];
 }
 
-export function openWishForm(...args) { return WishlistView.openWishForm(...args); }
-export function closeWishForm(...args) { return WishlistView.closeWishForm(...args); }
+export function openWishForm(...args) {
+  const result = WishlistView.openWishForm(...args);
+  pushUiHistory('wishForm');
+  return result;
+}
+export function closeWishForm(...args) {
+  const result = WishlistView.closeWishForm(...args);
+  if (appState.historyLayer === 'wishForm') appState.historyLayer = null;
+  return result;
+}
 export function clearWishForm(...args) { return WishlistView.clearWishForm(...args); }
 export function saveWish(...args) { return WishlistView.saveWish(...args); }
 export function deleteWish(...args) { return WishlistView.deleteWish(...args); }
@@ -1426,7 +1609,7 @@ export function moveWishToCollection(id) {
   document.getElementById('fSourceUrl').value = w.sourceUrl || '';
   updateEurPreview();
   switchTab('collection');
-  document.getElementById('formTitle').dataset.i18n = 'form.addFigure'; document.getElementById('formTitle').textContent = t('form.addFigure'); appState.editingId = null; document.getElementById('formOverlay').style.display = 'flex'; toast('Заполни заказ и сохрани — фигурка перейдёт в коллекцию');
+  document.getElementById('formTitle').dataset.i18n = 'form.addFigure'; document.getElementById('formTitle').textContent = t('form.addFigure'); appState.editingId = null; document.getElementById('formOverlay').style.display = 'flex'; pushUiHistory('form'); toast(t('toast.moveWishPrompt'));
 }
 
 function mediaUrlsOf(item) {
@@ -1460,6 +1643,75 @@ function mediaForUrl(value) {
   return mediaLookup.get(url) || value;
 }
 
+function normalizeLightboxEntry(value) {
+  const media = value?.media ?? value;
+  const url = String(value?.url || getMediaUrl(media) || '').trim();
+  if (!url) return null;
+  return { url, media, kind: value?.kind || getMediaKind(media) };
+}
+
+function getLightboxOwner(ownerType, ownerId) {
+  if (!ownerId) return null;
+  if (ownerType === 'wishlist') return (state.wishlist || []).find(item => item.id === ownerId) || null;
+  if (ownerType === 'collection') return (state.items || []).find(item => item.id === ownerId) || null;
+  return (state.items || []).find(item => item.id === ownerId)
+    || (state.wishlist || []).find(item => item.id === ownerId)
+    || null;
+}
+
+function getLightboxItems(src, context) {
+  if (Array.isArray(context)) return context.map(normalizeLightboxEntry).filter(Boolean);
+
+  if (context && typeof context === 'object') {
+    const explicitItems = context.items || context.mediaItems || context.media || [];
+    if (Array.isArray(explicitItems) && explicitItems.length) {
+      return explicitItems.map(normalizeLightboxEntry).filter(Boolean);
+    }
+
+    const owner = getLightboxOwner(context.ownerType, context.ownerId);
+    if (owner) return mediaEntriesOf(owner);
+  }
+
+  if (typeof context === 'string') {
+    if (context === 'modal' && Array.isArray(window.currentModalMedia) && window.currentModalMedia.length) {
+      return window.currentModalMedia.map(normalizeLightboxEntry).filter(Boolean);
+    }
+
+    const owner = getLightboxOwner('', context);
+    if (owner) return mediaEntriesOf(owner);
+
+    if (context === 'gallery') {
+      return [...document.querySelectorAll('#galleryGrid [data-media-url]')]
+        .map(el => normalizeLightboxEntry(el.dataset.mediaUrl))
+        .filter(Boolean);
+    }
+  }
+
+  return [normalizeLightboxEntry(src)].filter(Boolean);
+}
+
+function updateLightboxControls() {
+  const items = appState.lightboxItems || [];
+  const hasMultiple = items.length > 1;
+  document.querySelectorAll('.lightbox-arrow').forEach(btn => {
+    btn.style.display = hasMultiple ? 'flex' : 'none';
+    btn.disabled = !hasMultiple;
+  });
+  const counter = document.getElementById('lightboxCounter');
+  if (counter) {
+    counter.textContent = hasMultiple ? `${appState.lightboxIndex + 1}/${items.length}` : '';
+  }
+}
+
+export function openItemLightbox(ownerType, ownerId, src, index = null, sourceVideo = null) {
+  const owner = getLightboxOwner(ownerType, ownerId);
+  const items = owner ? mediaEntriesOf(owner) : [];
+  const startTime = Number(sourceVideo?.currentTime || 0);
+  const autoplay = Boolean(sourceVideo && !sourceVideo.paused && !sourceVideo.ended);
+  if (sourceVideo) sourceVideo.pause();
+  openLightbox(src, { items, index, ownerId, ownerType, startTime, autoplay });
+}
+
 function renderClickableMedia(url, className = '', alt = '', lightboxContext = 'gallery') {
   if (!url) return '';
 
@@ -1469,14 +1721,22 @@ function renderClickableMedia(url, className = '', alt = '', lightboxContext = '
     return renderMediaTag(url, className, alt);
   }
 
-  return `<img class="${className} zoomable" data-media-url="${H(url)}" src="${H(url)}" loading="lazy" alt="${H(alt || '')}" onerror="handleMediaLoadError(this)" onclick="event.stopPropagation();openLightbox('${H(url)}','${H(lightboxContext)}')">`;
+  return `<img class="${className} zoomable" data-media-url="${H(url)}" src="${H(url)}" loading="lazy" alt="${H(alt || '')}" onerror="handleMediaLoadError(this)" onclick="event.stopPropagation();openItemLightbox('', '${H(lightboxContext)}', '${H(url)}')">`;
 }
 
-export function editWish(...args) { return WishlistView.editWish(...args); }
+export function editWish(...args) {
+  const result = WishlistView.editWish(...args);
+  pushUiHistory('wishForm');
+  return result;
+}
 export function renderWishlist(...args) { return WishlistView.renderWishlist(...args); }
-export function openWishModal(...args) { return WishlistView.openWishModal(...args); }
+export function openWishModal(...args) {
+  const result = WishlistView.openWishModal(...args);
+  pushUiHistory('modal');
+  return result;
+}
 
-function setModalMedia(media, alt = '') {
+function setModalMedia(media, alt = '', lightboxContext = 'modal') {
   const oldEl = document.getElementById('modalImg');
   if (!oldEl) return;
   stopMedia(oldEl.parentElement || document.getElementById('modalOverlay'), { resetSrc: true });
@@ -1486,6 +1746,7 @@ function setModalMedia(media, alt = '') {
   const kind = getMediaKind(resolvedMedia);
 
   let newEl;
+  const stopVideoEvent = (event) => stopMediaEvent(event);
 
   if (kind === 'animation') {
     newEl = document.createElement('video');
@@ -1495,14 +1756,18 @@ function setModalMedia(media, alt = '') {
     newEl.playsInline = true;
     newEl.preload = 'metadata';
     newEl.src = safeUrl;
-    newEl.onclick = (event) => event.stopPropagation();
+    newEl.onclick = stopVideoEvent;
+    newEl.onpointerdown = stopVideoEvent;
+    newEl.ontouchstart = stopVideoEvent;
   } else if (kind === 'video') {
     newEl = document.createElement('video');
     newEl.controls = true;
     newEl.preload = 'metadata';
     newEl.playsInline = true;
     newEl.src = safeUrl;
-    newEl.onclick = (event) => event.stopPropagation();
+    newEl.onclick = stopVideoEvent;
+    newEl.onpointerdown = stopVideoEvent;
+    newEl.ontouchstart = stopVideoEvent;
   } else {
     newEl = document.createElement('img');
     newEl.src = safeUrl;
@@ -1510,11 +1775,12 @@ function setModalMedia(media, alt = '') {
 
     newEl.onclick = (event) => {
       event.stopPropagation();
-      if (safeUrl) openLightbox(safeUrl, 'modal');
+      if (safeUrl) openLightbox(safeUrl, lightboxContext);
     };
   }
 
   newEl.id = 'modalImg';
+  if (newEl.tagName === 'VIDEO') newEl.dataset.noCardOpen = 'true';
 
   // zoomable только для фото, не для видео/gif-анимаций
   newEl.className = 'modal-img ' + (safeUrl && kind === 'image' ? 'zoomable' : '');
@@ -1536,7 +1802,7 @@ function setModalMedia(media, alt = '') {
   oldEl.replaceWith(newEl);
 }
 
-function setLightboxMedia(media, alt = '') {
+function setLightboxMedia(media, alt = '', options = {}) {
   const oldEl = document.getElementById('lightboxImg');
   if (!oldEl) return;
   stopMedia(document.getElementById('lightboxOverlay'), { resetSrc: true });
@@ -1546,6 +1812,7 @@ function setLightboxMedia(media, alt = '') {
   const kind = getMediaKind(resolvedMedia);
 
   let newEl;
+  const stopVideoEvent = (event) => stopMediaEvent(event);
 
   if (kind === 'animation') {
     newEl = document.createElement('video');
@@ -1555,14 +1822,29 @@ function setLightboxMedia(media, alt = '') {
     newEl.playsInline = true;
     newEl.preload = 'metadata';
     newEl.src = safeUrl;
-    newEl.onclick = (event) => event.stopPropagation();
+    newEl.onclick = stopVideoEvent;
+    newEl.onpointerdown = stopVideoEvent;
+    newEl.ontouchstart = stopVideoEvent;
   } else if (kind === 'video') {
     newEl = document.createElement('video');
     newEl.controls = true;
     newEl.preload = 'metadata';
     newEl.playsInline = true;
     newEl.src = safeUrl;
-    newEl.onclick = (event) => event.stopPropagation();
+    newEl.onclick = stopVideoEvent;
+    newEl.onpointerdown = stopVideoEvent;
+    newEl.ontouchstart = stopVideoEvent;
+    const startTime = Number(options.startTime || 0);
+    if (startTime > 0) {
+      newEl.addEventListener('loadedmetadata', () => {
+        try { newEl.currentTime = Math.min(startTime, Number(newEl.duration || startTime)); } catch {}
+      }, { once: true });
+    }
+    if (options.autoplay) {
+      newEl.addEventListener('canplay', () => {
+        newEl.play?.().catch(() => null);
+      }, { once: true });
+    }
   } else {
     newEl = document.createElement('img');
     newEl.src = safeUrl;
@@ -1571,6 +1853,7 @@ function setLightboxMedia(media, alt = '') {
   }
 
   newEl.id = 'lightboxImg';
+  if (newEl.tagName === 'VIDEO') newEl.dataset.noCardOpen = 'true';
 
   if (kind === 'animation') {
     newEl.className = 'lightbox-media lightbox-animation';
@@ -1583,43 +1866,54 @@ function setLightboxMedia(media, alt = '') {
   newEl.style.display = safeUrl ? 'block' : 'none';
 
   oldEl.replaceWith(newEl);
+  pauseAllVideosExcept(newEl.tagName === 'VIDEO' ? newEl : null);
 }
 
 export function openModal(id) {
+  pauseAllVideosExcept();
   document.getElementById('modalMove').style.display = 'none';
   const rawItem = state.items.find(i => i.id === id); if (!rawItem) return;
   const item = normalizeProductMeta(rawItem);
   appState.modalItemId = id;
   const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
   document.getElementById('modalName').textContent = item.name || '—';
-  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">Заказ</span><span>#${H(item.orderNumber)} — ${H(item.orderName || '')}</span></div><div class="modal-row"><span class="modal-label">Магазин</span><span>${H(item.store || '—')}</span></div><div class="modal-row"><span class="modal-label">Регион</span><span>${H(item.region || '—')}</span></div><div class="modal-row"><span class="modal-label">Производитель</span><span>${H(item.manufacturer || '—')}</span></div><div class="modal-row"><span class="modal-label">Цена</span><span>${item.priceOriginal} ${item.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div><div class="modal-row"><span class="modal-label">Доставка</span><span>€${Number(item.shippingEur || 0).toFixed(2)}</span></div><div class="modal-row"><span class="modal-label">Предоплата</span><span>€${Number(item.deposit || 0).toFixed(2)}</span></div>${renderProductMetaRows(item)}${item.tags?.length ? `<div class="modal-row"><span class="modal-label">Теги</span><span class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${item.shopUrl ? `<div class="modal-row"><span class="modal-label">Страница товара</span><a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">Открыть в магазине</a></div>` : ''}
+  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">${t('modal.order')}</span><span>#${H(item.orderNumber)} — ${H(item.orderName || '')}</span></div><div class="modal-row"><span class="modal-label">${t('modal.store')}</span><span>${H(item.store || '—')}</span></div><div class="modal-row"><span class="modal-label">${t('modal.region')}</span><span>${H(item.region || '—')}</span></div><div class="modal-row"><span class="modal-label">${t('modal.manufacturer')}</span><span>${H(item.manufacturer || '—')}</span></div><div class="modal-row"><span class="modal-label">${t('modal.price')}</span><span>${item.priceOriginal} ${item.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div><div class="modal-row"><span class="modal-label">${t('modal.shipping')}</span><span>€${Number(item.shippingEur || 0).toFixed(2)}</span></div><div class="modal-row"><span class="modal-label">${t('modal.deposit')}</span><span>€${Number(item.deposit || 0).toFixed(2)}</span></div>${renderProductMetaRows(item)}${item.tags?.length ? `<div class="modal-row"><span class="modal-label">${t('modal.tags')}</span><span class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${item.shopUrl ? `<div class="modal-row"><span class="modal-label">${t('modal.productPage')}</span><a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">${t('common.openStore')}</a></div>` : ''}
   ${(item.rateAtSave && item.currency !== 'EUR') ? `<div class="modal-row"><span class="modal-label">Курс при добавлении</span><span>€${item.rateAtSave.toFixed(item.currency === 'JPY' ? 5 : 4)} за 1 ${item.currency} <span style="color:var(--muted)">(${item.rateAtSaveDate || '—'})</span></span></div><div class="modal-row"><span class="modal-label">Курс сейчас</span><span>€${(state.rates[item.currency] || 1).toFixed(item.currency === 'JPY' ? 5 : 4)} за 1 ${item.currency} ${(() => { const old = item.rateAtSave || 1; const now = state.rates[item.currency] || 1; const diff = ((now - old) / old * 100).toFixed(1); const color = now > old ? 'var(--green)' : 'var(--red)'; const arrow = now > old ? '↑' : '↓'; return now === old ? '<span style="color:var(--muted)">без изменений</span>' : `<span style="color:${color}">${arrow} ${Math.abs(diff)}%</span>`; })()}</span></div>` : ''}
-  <div class="modal-row"><span class="modal-label">Статус</span><span class="badge ${badgeClass(item.status)}">${H(item.status || '—')}</span></div>`;
+  <div class="modal-row"><span class="modal-label">${t('modal.status')}</span><span class="badge ${badgeClass(item.status)}">${H(item.status || '—')}</span></div>`;
 
   const imgs = mediaEntriesOf(item);
   window.currentModalImages = imgs.map(img => img.url);
+  window.currentModalMedia = imgs;
   let imgIdx = 0;
   function updateModalImg() {
-    setModalMedia(imgs[imgIdx]?.media || '', item?.name || '');
+    setModalMedia(imgs[imgIdx]?.media || '', item?.name || '', {
+      items: imgs,
+      index: imgIdx,
+      ownerId: id,
+      ownerType: 'collection'
+    });
     document.getElementById('modalImgCounter').textContent = imgs.length > 1 ? `${imgIdx + 1} / ${imgs.length}` : '';
     document.getElementById('modalImgPrev').style.display = imgs.length > 1 ? 'flex' : 'none'; document.getElementById('modalImgNext').style.display = imgs.length > 1 ? 'flex' : 'none';
   }
 
   const receiveBtn = document.getElementById('modalReceive');
   if (item.status === 'Получено') { receiveBtn.style.display = 'none'; } else {
-    receiveBtn.style.display = 'flex'; receiveBtn.onclick = () => { state.items.find(i => i.id === id).status = 'Получено'; persist(); render(); renderShelf(); toast('✅ Получено! Фигурка добавлена на полку'); closeModal(); };
+    receiveBtn.style.display = 'flex'; receiveBtn.onclick = () => { state.items.find(i => i.id === id).status = 'Получено'; persist(); render(); renderShelf(); toast(t('toast.itemReceived')); closeModal(); };
   }
   document.getElementById('modalImgPrev').onclick = () => { imgIdx = (imgIdx - 1 + imgs.length) % imgs.length; updateModalImg(); };
   document.getElementById('modalImgNext').onclick = () => { imgIdx = (imgIdx + 1) % imgs.length; updateModalImg(); };
   updateModalImg();
   document.getElementById('modalEdit').onclick = () => { closeModal(); editItem(id); };
-  document.getElementById('modalDelete').onclick = () => { if (confirm('Удалить?')) { closeModal(); deleteItem(id); } };
+  document.getElementById('modalDelete').onclick = () => { if (confirm(t('confirm.deleteGeneric'))) { closeModal(); deleteItem(id); } };
   document.getElementById('modalOverlay').style.display = 'flex'; document.getElementById('modalMove').style.display = 'none';
+  pushUiHistory('modal');
 }
 
 export function closeModal() {
   stopMedia(document.getElementById('modalOverlay'), { resetSrc: true });
   document.getElementById('modalOverlay').style.display = 'none'; appState.modalItemId = null;
+  window.currentModalMedia = [];
+  if (appState.historyLayer === 'modal') appState.historyLayer = null;
   document.getElementById('modalImgPrev').onclick = null; document.getElementById('modalImgNext').onclick = null; document.getElementById('modalImgCounter').textContent = '';
   document.getElementById('modalImgPrev').style.display = 'none'; document.getElementById('modalImgNext').style.display = 'none';
 }
@@ -1661,82 +1955,92 @@ export function renderShelf() {
   const stats = document.getElementById('shelfStats');
   if (stats) stats.innerHTML = `<span style="color:var(--green);font-weight:700;">${received.length} фигурок</span> · итого <span style="color:var(--green);font-weight:700;">€${totalSpent.toFixed(2)}</span>`;
   const grid = document.getElementById('shelfGrid');
-  if (!items.length) { grid.innerHTML = `<div style="color:var(--muted);text-align:center;padding:60px 0;grid-column:1/-1;">Полка пуста 📦</div>`; return; }
-  grid.innerHTML = items.map((item, idx) => `
-    <div class="gallery-card animate-in" style="animation-delay:${idx * 30}ms" onclick="openModal('${H(item.id)}')">
+  if (!items.length) { grid.innerHTML = `<div style="color:var(--muted);text-align:center;padding:60px 0;grid-column:1/-1;">${t('shelf.empty')}</div>`; return; }
+  grid.innerHTML = items.map((item, idx) => {
+    const media = mediaEntriesOf(item);
+    const first = media[0];
+    const mediaTag = first ? renderMediaTag(first.media, 'gallery-media', item.name)
+      .replace(/class="([^"]*gallery-media[^"]*)"/, `class="$1" data-media-url="${H(first.url)}"`) : '';
+    const mediaHtml = !first
+      ? `<div class="gallery-placeholder">🖼️</div>`
+      : first.kind === 'image'
+        ? `<img class="zoomable gallery-media" data-media-url="${H(first.url)}" src="${H(first.url)}" loading="lazy" alt="${H(item.name)}" onerror="this.style.opacity=.1" onclick="event.stopPropagation();openItemLightbox('collection','${H(item.id)}','${H(first.url)}',0)">`
+        : `<div class="gallery-video-wrap" data-no-card-open="true">
+            ${mediaTag}
+            <button class="icon-action-btn media-open-btn" type="button" title="${t('common.open')}" onclick="event.stopPropagation();openItemLightbox('collection','${H(item.id)}','${H(first.url)}',0,this.closest('.gallery-video-wrap')?.querySelector('video'))">⛶</button>
+          </div>`;
+    return `
+    <div class="gallery-card animate-in" style="animation-delay:${idx * 30}ms" onclick="if(isCardOpenBlocked(event))return;openModal('${H(item.id)}')">
       <div class="gallery-img-wrap">
-        ${item.imageUrl ? `<img class="zoomable" src="${H(item.imageUrl)}" loading="lazy" alt="${H(item.name)}" onerror="this.style.opacity=.1" onclick="event.stopPropagation();openLightbox('${H(item.imageUrl)}','${H(item.name)}')">` : `<div class="gallery-placeholder">🖼️</div>`}
+        ${mediaHtml}
         <div class="gallery-overlay"><div class="gallery-name">${H(item.name)}</div><div class="gallery-price">€${item.totalPaid.toFixed(2)}</div></div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+  ensurePreviewVideoControls(grid);
 }
 
 export function openLightbox(src, context = 'gallery') {
   if (!src) return;
+  pauseAllVideosExcept();
 
   const overlay = document.getElementById('lightboxOverlay');
-  const counter = document.getElementById('lightboxCounter');
+  const items = getLightboxItems(src, context);
+  const srcUrl = String(getMediaUrl(src) || src || '');
+  const hasContextIndex = context && typeof context === 'object' && context.index !== null
+    && typeof context.index !== 'undefined' && Number.isFinite(Number(context.index));
+  const requestedIndex = hasContextIndex
+    ? Number(context.index)
+    : items.findIndex(item => item.url === srcUrl);
+  const index = Math.max(0, Math.min(items.length - 1, requestedIndex < 0 ? 0 : requestedIndex));
 
-  if (context === 'gallery') {
-    appState.lightboxPhotos = [...document.querySelectorAll('#galleryGrid [data-media-url]')]
-      .map(el => el.dataset.mediaUrl)
-      .filter(Boolean);
+  appState.lightboxItems = items;
+  appState.lightboxPhotos = items.map(item => item.url);
+  appState.lightboxIndex = index;
+  appState.lightboxCurrentUrl = items[index]?.url || srcUrl;
 
-    appState.lightboxIndex = Math.max(0, appState.lightboxPhotos.indexOf(src));
-  } else if (context === 'modal') {
-    appState.lightboxPhotos = Array.isArray(window.currentModalImages)
-      ? window.currentModalImages
-      : [src];
-
-    appState.lightboxIndex = Math.max(0, appState.lightboxPhotos.indexOf(src));
-  } else {
-    appState.lightboxPhotos = [src];
-    appState.lightboxIndex = 0;
-  }
-
-  setLightboxMedia(appState.lightboxPhotos[appState.lightboxIndex] || src);
+  setLightboxMedia(items[index]?.media || items[index]?.url || src, '', {
+    startTime: context && typeof context === 'object' ? context.startTime : 0,
+    autoplay: Boolean(context && typeof context === 'object' && context.autoplay)
+  });
 
   overlay.style.display = 'flex';
+  pushUiHistory('lightbox');
   document.removeEventListener('keydown', lightboxKeyHandler);
   document.addEventListener('keydown', lightboxKeyHandler);
-
-  if (counter) {
-    counter.textContent = appState.lightboxPhotos.length > 1
-      ? `${appState.lightboxIndex + 1}/${appState.lightboxPhotos.length}`
-      : '';
-  }
+  updateLightboxControls();
 }
 
 export function showLightboxPhoto() {
-  const counterEl = document.getElementById('lightboxCounter');
-  setLightboxMedia(appState.lightboxPhotos[appState.lightboxIndex]);
-  if (appState.lightboxPhotos.length > 1) { if (counterEl) counterEl.textContent = `${appState.lightboxIndex + 1} / ${appState.lightboxPhotos.length}`; } else { if (counterEl) counterEl.textContent = ''; }
+  const items = appState.lightboxItems || [];
+  const current = items[appState.lightboxIndex];
+  setLightboxMedia(current?.media || current?.url || appState.lightboxPhotos?.[appState.lightboxIndex]);
+  appState.lightboxCurrentUrl = current?.url || appState.lightboxCurrentUrl || '';
+  updateLightboxControls();
 }
 
 export function lightboxNav(dir) {
-  const photos = appState.lightboxPhotos || [];
-  if (!photos.length) return;
+  const items = appState.lightboxItems || [];
+  if (items.length <= 1) return;
 
   appState.lightboxIndex =
-    (appState.lightboxIndex + dir + photos.length) % photos.length;
+    (appState.lightboxIndex + dir + items.length) % items.length;
 
-  const currentUrl = photos[appState.lightboxIndex];
-
-  setLightboxMedia(currentUrl);
-
-  const counter = document.getElementById('lightboxCounter');
-  if (counter) {
-    counter.textContent = photos.length > 1
-      ? `${appState.lightboxIndex + 1}/${photos.length}`
-      : '';
-  }
+  const current = items[appState.lightboxIndex];
+  appState.lightboxCurrentUrl = current?.url || '';
+  pauseAllVideosExcept();
+  setLightboxMedia(current?.media || current?.url || '');
+  updateLightboxControls();
 }
 
 export function lightboxKeyHandler(e) { if (e.key === 'ArrowRight') lightboxNav(1); if (e.key === 'ArrowLeft') lightboxNav(-1); if (e.key === 'Escape') closeLightbox(); }
 export function closeLightbox() {
   const overlay = document.getElementById('lightboxOverlay');
+  pauseAllVideosExcept();
   stopMedia(overlay, { resetSrc: true });
   if (overlay) overlay.style.display = 'none';
+  if (appState.historyLayer === 'lightbox') appState.historyLayer = null;
+  appState.lightboxCurrentUrl = '';
   document.removeEventListener('keydown', lightboxKeyHandler);
 }
 export function initLightboxTouch() {
@@ -1770,7 +2074,7 @@ export function renderCalendar() {
     let classes = 'calendar-month';
     if (appState.currentCalendarYear === currentYear && m === currentMonth) classes += ' current';
     else if (appState.currentCalendarYear < currentYear || (appState.currentCalendarYear === currentYear && m < currentMonth)) classes += ' past';
-    html += `<div class="${classes}"><div class="month-name"><span>${MONTH_NAMES[m]}</span><span style="font-size:12px;color:var(--muted);font-weight:normal;">${itemsInMonth.length ? itemsInMonth.length + ' шт.' : ''}</span></div><div class="month-items">${itemsInMonth.length ? itemsInMonth.map(item => `<div class="calendar-item" onclick="${item._type === 'collection' ? `openModal('${H(item.id)}')` : `openWishModal('${H(item.id)}')`}">${item.imageUrl
+    html += `<div class="${classes}"><div class="month-name"><span>${MONTH_NAMES[m]}</span><span style="font-size:12px;color:var(--muted);font-weight:normal;">${itemsInMonth.length ? itemsInMonth.length + ' шт.' : ''}</span></div><div class="month-items">${itemsInMonth.length ? itemsInMonth.map(item => `<div class="calendar-item" onclick="if(isCardOpenBlocked(event))return;${item._type === 'collection' ? `openModal('${H(item.id)}')` : `openWishModal('${H(item.id)}')`}">${item.imageUrl
       ? renderClickableMedia(item.imageUrl, 'figure-img', item.name, item.id)
       : `<div class="figure-img" style="display:flex;align-items:center;justify-content:center;font-size:36px;">📦</div>`}<div class="calendar-item-info"><div class="calendar-item-name">${H(item.name)}</div><div class="calendar-item-type">${item._type === 'collection' ? '📦 В коллекции/Предзаказ' : '⭐ Вишлист'}</div></div></div>`).join('') : '<div style="font-size:12px;color:var(--faint);text-align:center;padding:14px 0;">Нет релизов</div>'}</div></div>`;
   }
@@ -1957,6 +2261,11 @@ export function hideStandalonePanes() {
 
 export function switchTab(tab = 'collection') {
   const previousTab = appState.currentTab;
+  if (STANDALONE_TABS.has(tab) && previousTab !== tab && !appState.standaloneTabHistory) {
+    pushUiHistory('tab');
+    appState.standaloneTabHistory = true;
+  }
+  if (tab === 'collection') appState.standaloneTabHistory = false;
   if (previousTab === 'gallery' && tab !== 'gallery') {
     stopMedia(document.getElementById('galleryPane'), { resetSrc: false });
   }
@@ -1972,11 +2281,13 @@ export function switchTab(tab = 'collection') {
   const sidebar = document.querySelector('.sidebar');
   const detailPane = document.getElementById('detailPane');
   const wishlistPane = document.getElementById('wishlistPane');
+  const mainPane = document.querySelector('.main');
 
   hideStandalonePanes();
   if (wishlistPane) wishlistPane.style.display = 'none';
 
   if (tab === 'collection') {
+    if (mainPane) mainPane.style.display = 'grid';
     if (sidebar) sidebar.style.display = 'flex';
     if (detailPane) detailPane.style.display = 'block';
     syncMobileCollectionView();
@@ -1997,11 +2308,19 @@ export function switchTab(tab = 'collection') {
   updateBanner(false);
 
   if (tab === 'wishlist') {
+    if (mainPane) {
+      mainPane.style.display = 'grid';
+      mainPane.classList.remove('mobile-list-mode', 'mobile-detail-mode');
+    }
     if (wishlistPane) wishlistPane.style.display = 'block';
     renderWishlist();
     return;
   }
 
+  if (mainPane) {
+    mainPane.style.display = 'none';
+    mainPane.classList.remove('mobile-list-mode', 'mobile-detail-mode');
+  }
   const pane = document.getElementById(`${tab}Pane`);
   if (pane) pane.style.display = 'block';
 

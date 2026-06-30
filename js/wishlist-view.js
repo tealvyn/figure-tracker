@@ -6,8 +6,16 @@ import { applyI18n, t } from './i18n.js';
 import { buildSearchText, formatReleaseDate, mergeTags, normalizeProductMeta, renderProductMetaBadges, renderProductMetaRows } from './product-meta.js';
 import { getMediaKind, getMediaUrl, isTelegramFileUrl } from './media-storage.js';
 
-const PRIORITY_LABEL = { high: '🔥 Куплю точно', mid: '⭐ Хочу', low: '💭 Если дёшево' };
 const PRIORITY_COLOR = { high: 'var(--red)', mid: 'var(--yellow)', low: 'var(--muted)' };
+
+function priorityLabel(priority) {
+  const labels = {
+    high: `🔥 ${t('wishlist.definitelyWant')}`,
+    mid: `⭐ ${t('wishlist.want')}`,
+    low: `💭 ${t('wishlist.ifCheap')}`
+  };
+  return labels[priority] || labels.mid;
+}
 
 function shouldUseExternalUrl(url) {
   return Boolean(url) && !isTelegramFileUrl(String(url));
@@ -49,7 +57,7 @@ function wishlistMediaEntries(wish) {
   return entries;
 }
 
-function setWishModalMedia(target, entry, alt = '') {
+function setWishModalMedia(target, entry, alt = '', lightboxContext = null) {
   if (!target) return null;
   const media = entry?.media || '';
   const url = getMediaUrl(media);
@@ -73,11 +81,17 @@ function setWishModalMedia(target, entry, alt = '') {
     next.playsInline = true;
     next.preload = 'metadata';
     next.src = url;
-    next.onclick = event => event.stopPropagation();
+    next.dataset.noCardOpen = 'true';
+    next.onclick = event => window.stopMediaEvent?.(event) || event.stopPropagation();
+    next.onpointerdown = event => window.stopMediaEvent?.(event) || event.stopPropagation();
+    next.ontouchstart = event => window.stopMediaEvent?.(event) || event.stopPropagation();
   } else {
     next.src = url;
     next.alt = alt || '';
-    next.onclick = url ? () => window.openLightbox?.(media, alt || 'wishlist') : null;
+    next.onclick = url ? event => {
+      event.stopPropagation();
+      window.openLightbox?.(media, lightboxContext || { items: [entry], index: 0, ownerType: 'wishlist' });
+    } : null;
   }
 
   next.onerror = () => window.handleMediaLoadError?.(next);
@@ -138,7 +152,7 @@ export function clearWishForm() {
 
 export function saveWish() {
   const name = document.getElementById('wName').value.trim();
-  if (!name) { alert('Укажи название'); return; }
+  if (!name) { alert(t('alert.wishNameRequired')); return; }
   const imageUrls = document.getElementById('wImg').value.split(',').map(s => s.trim()).filter(shouldUseExternalUrl);
   const wish = normalizeProductMeta({
     id: appState.editingWishId || crypto.randomUUID(),
@@ -176,18 +190,18 @@ export function saveWish() {
   persist();
   renderWishlist();
   updateWishlistBadge();
-  toast(appState.editingWishId ? 'Сохранено' : 'Добавлено в вишлист!');
+  toast(appState.editingWishId ? t('toast.saved') : t('wishlist.added'));
 }
 
 export function deleteWish(id) {
-  if (!confirm('Удалить из вишлиста?')) return;
+  if (!confirm(t('confirm.deleteWish'))) return;
   window.createLocalBackup?.('before-delete-wish', true);
   state.wishlist = state.wishlist.filter(w => w.id !== id);
   syncWishlistGlobalTags();
   persist();
   renderWishlist();
   updateWishlistBadge();
-  toast('Удалено');
+  toast(t('toast.deleted'));
 }
 
 export function editWish(id) {
@@ -235,37 +249,33 @@ export function renderWishlist() {
     }, { high: 0, mid: 0, low: 0 });
     const estimated = allWishes.reduce((sum, w) => sum + toEur(w.priceOriginal || 0, w.currency || 'EUR'), 0);
     stats.innerHTML = `
-      <div class="wish-stat"><span>Всего</span><strong>${allWishes.length}</strong></div>
-      <div class="wish-stat high"><span>Точно хочу</span><strong>${counts.high || 0}</strong></div>
-      <div class="wish-stat mid"><span>Хочу</span><strong>${counts.mid || 0}</strong></div>
-      <div class="wish-stat low"><span>Если дёшево</span><strong>${counts.low || 0}</strong></div>
-      <div class="wish-stat total"><span>Оценка</span><strong>${eur(estimated)}</strong></div>`;
+      <div class="wish-stat"><span>${t('wishlist.total')}</span><strong>${allWishes.length}</strong></div>
+      <div class="wish-stat high"><span>${t('wishlist.definitelyWant')}</span><strong>${counts.high || 0}</strong></div>
+      <div class="wish-stat mid"><span>${t('wishlist.want')}</span><strong>${counts.mid || 0}</strong></div>
+      <div class="wish-stat low"><span>${t('wishlist.ifCheap')}</span><strong>${counts.low || 0}</strong></div>
+      <div class="wish-stat total"><span>${t('wishlist.estimate')}</span><strong>${eur(estimated)}</strong></div>`;
   }
   const grid = document.getElementById('wishGrid');
   if (!grid) return;
   if (!wishes.length) {
-    grid.innerHTML = '<div style="color:var(--muted);padding:40px 0;grid-column:1/-1;text-align:center;">Вишлист пуст — добавь первую мечту! ⭐</div>';
+    grid.innerHTML = `<div style="color:var(--muted);padding:40px 0;grid-column:1/-1;text-align:center;">${t('wishlist.empty')}</div>`;
     return;
   }
-  grid.innerHTML = wishes.map(w => {
-    const priceEur = toEur(w.priceOriginal || 0, w.currency || 'EUR');
-    return `<div class="wish-card animate-in" style="animation-delay:${wishes.indexOf(w) * 40}ms" onclick="openWishModal('${H(w.id)}')">${w.imageUrl ? `<img class="wish-img" src="${H(w.imageUrl)}" loading="lazy" alt="${H(w.name)}" onerror="this.style.opacity='.1'">` : `<div class="wish-img" style="display:flex;align-items:center;justify-content:center;font-size:48px;">⭐</div>`}<div class="wish-body"><div class="wish-name">${H(w.name)}</div><div class="wish-meta">${H(w.store || '—')}</div><div class="wish-price" style="color:${PRIORITY_COLOR[w.priority]}">${PRIORITY_LABEL[w.priority]}</div>${w.priceOriginal ? `<div class="wish-meta" style="color:var(--accent);margin-top:4px;">~€${priceEur}</div>` : ''}</div></div>`;
-  }).join('');
   grid.innerHTML = wishes.map(w => {
     const wish = normalizeProductMeta(w);
     const coverEntry = wishlistMediaEntries(wish)[0];
     const coverUrl = coverEntry?.url || wish.imageUrl || '';
     const coverMedia = coverEntry?.media || coverUrl;
     const priceEur = toEur(wish.priceOriginal || 0, wish.currency || 'EUR');
-    return `<div class="wish-card animate-in" style="animation-delay:${wishes.indexOf(w) * 40}ms" onclick="openWishModal('${H(wish.id)}')">
+    return `<div class="wish-card animate-in" style="animation-delay:${wishes.indexOf(w) * 40}ms" onclick="if(window.isCardOpenBlocked?.(event))return;openWishModal('${H(wish.id)}')">
       ${coverUrl ? `<img class="wish-img" src="${H(coverUrl)}" loading="lazy" alt="${H(wish.name)}" data-provider="${H(coverMedia?.provider || '')}" data-file-id="${H(coverMedia?.fileId || '')}" data-media-type="${H(coverMedia?.mediaType || '')}" onerror="handleMediaLoadError(this)">` : `<div class="wish-img" style="display:flex;align-items:center;justify-content:center;font-size:48px;">⭐</div>`}
       <div class="wish-body">
         <div class="wish-name">${H(wish.name)}</div>
         ${wish.store ? `<div class="wish-meta">${H(wish.store)}</div>` : ''}
         ${wish.manufacturer ? `<div class="wish-meta">${H(wish.manufacturer)}</div>` : ''}
-        ${wish.releaseDate ? `<div class="wish-meta">Релиз: ${H(wish.releaseDate)}</div>` : ''}
+        ${wish.releaseDate ? `<div class="wish-meta">${t('wishlist.release')}: ${H(wish.releaseDate)}</div>` : ''}
         ${wish.priceOriginal ? `<div class="wish-meta" style="color:var(--accent);margin-top:4px;">${H(String(wish.priceOriginal))} ${H(wish.currency || '')} · ~€${priceEur}</div>` : ''}
-        <div class="wish-price" style="color:${PRIORITY_COLOR[wish.priority]}">${PRIORITY_LABEL[wish.priority]}</div>
+        <div class="wish-price" style="color:${PRIORITY_COLOR[wish.priority]}">${priorityLabel(wish.priority)}</div>
         <div class="product-badges">${renderProductMetaBadges(wish)}</div>
         ${wish.tags?.length ? `<div class="tags">${wish.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</div>` : ''}
       </div>
@@ -274,6 +284,7 @@ export function renderWishlist() {
 }
 
 export function openWishModal(id) {
+  window.pauseAllVideosExcept?.();
   const rawWish = (state.wishlist || []).find(x => x.id === id);
   if (!rawWish) return;
   const w = normalizeProductMeta(rawWish);
@@ -284,7 +295,12 @@ export function openWishModal(id) {
 
   function updateWishModalImg() {
     window.stopMedia?.(document.getElementById('modalOverlay'), { resetSrc: true });
-    modalImg = setWishModalMedia(modalImg, imgs[imgIdx], w.name);
+    modalImg = setWishModalMedia(modalImg, imgs[imgIdx], w.name, {
+      items: imgs,
+      index: imgIdx,
+      ownerId: id,
+      ownerType: 'wishlist'
+    });
     document.getElementById('modalImgCounter').textContent = imgs.length > 1 ? `${imgIdx + 1} / ${imgs.length}` : '';
     document.getElementById('modalImgPrev').style.display = imgs.length > 1 ? 'flex' : 'none';
     document.getElementById('modalImgNext').style.display = imgs.length > 1 ? 'flex' : 'none';
@@ -294,11 +310,10 @@ export function openWishModal(id) {
   document.getElementById('modalImgNext').onclick = () => { imgIdx = (imgIdx + 1) % imgs.length; updateWishModalImg(); };
   updateWishModalImg();
   document.getElementById('modalName').textContent = w.name || '—';
-  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">Приоритет</span><span style="color:${PRIORITY_COLOR[w.priority]}">${PRIORITY_LABEL[w.priority]}</span></div><div class="modal-row"><span class="modal-label">Магазин</span><span>${H(w.store || '—')}</span></div><div class="modal-row"><span class="modal-label">Производитель</span><span>${H(w.manufacturer || '—')}</span></div><div class="modal-row"><span class="modal-label">Дата выхода</span><span>${H(w.releaseDate || '—')}</span></div>${w.priceOriginal ? `<div class="modal-row"><span class="modal-label">Цена</span><span>${w.priceOriginal} ${w.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div>` : ''}${w.notes ? `<div class="modal-row"><span class="modal-label">Заметки</span><span>${H(w.notes)}</span></div>` : ''}${w.shopUrl ? `<div class="modal-row"><span class="modal-label">Страница товара</span><a href="${H(w.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">Открыть в магазине </a></div>` : ''}`;
-  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">Приоритет</span><span style="color:${PRIORITY_COLOR[w.priority]}">${PRIORITY_LABEL[w.priority]}</span></div>${w.store ? `<div class="modal-row"><span class="modal-label">Магазин</span><span>${H(w.store)}</span></div>` : ''}${w.manufacturer ? `<div class="modal-row"><span class="modal-label">Производитель</span><span>${H(w.manufacturer)}</span></div>` : ''}${w.priceOriginal ? `<div class="modal-row"><span class="modal-label">Цена</span><span>${w.priceOriginal} ${w.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div>` : ''}${renderProductMetaRows(w)}${w.tags?.length ? `<div class="modal-row"><span class="modal-label">Теги</span><span class="tags">${w.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${w.notes ? `<div class="modal-row"><span class="modal-label">Заметки</span><span>${H(w.notes)}</span></div>` : ''}${w.shopUrl ? `<div class="modal-row"><span class="modal-label">Страница товара</span><a href="${H(w.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">Открыть в магазине</a></div>` : ''}`;
+  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">${t('modal.priority')}</span><span style="color:${PRIORITY_COLOR[w.priority]}">${priorityLabel(w.priority)}</span></div>${w.store ? `<div class="modal-row"><span class="modal-label">${t('modal.store')}</span><span>${H(w.store)}</span></div>` : ''}${w.manufacturer ? `<div class="modal-row"><span class="modal-label">${t('modal.manufacturer')}</span><span>${H(w.manufacturer)}</span></div>` : ''}${w.priceOriginal ? `<div class="modal-row"><span class="modal-label">${t('modal.price')}</span><span>${w.priceOriginal} ${w.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div>` : ''}${renderProductMetaRows(w)}${w.tags?.length ? `<div class="modal-row"><span class="modal-label">${t('modal.tags')}</span><span class="tags">${w.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${w.notes ? `<div class="modal-row"><span class="modal-label">${t('modal.notes')}</span><span>${H(w.notes)}</span></div>` : ''}${w.shopUrl ? `<div class="modal-row"><span class="modal-label">${t('modal.productPage')}</span><a href="${H(w.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">${t('common.openStore')}</a></div>` : ''}`;
   document.getElementById('modalMove').style.display = 'flex';
   document.getElementById('modalMove').onclick = () => window.moveWishToCollection?.(id);
   document.getElementById('modalEdit').onclick = () => { window.closeModal?.(); window.editWish?.(id); };
-  document.getElementById('modalDelete').onclick = () => { if (confirm('Удалить?')) { window.closeModal?.(); deleteWish(id); } };
+  document.getElementById('modalDelete').onclick = () => { if (confirm(t('confirm.deleteGeneric'))) { window.closeModal?.(); deleteWish(id); } };
   document.getElementById('modalOverlay').style.display = 'flex';
 }

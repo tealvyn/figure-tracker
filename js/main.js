@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.bindItemDraftAutosave();
   API.fetchRates();
   UI.render();
+  UI.initPreviewVideoControlsObserver();
   UI.checkReleaseReminders();
   UI.initParticles();
 

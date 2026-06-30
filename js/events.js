@@ -13,6 +13,8 @@ const debounce = (fn, delay = 120) => {
 };
 
 export function bindStaticControls() {
+  UI.bindHistoryBackHandling();
+
   document.getElementById('mainTabs')?.addEventListener('click', (e) => {
     const tab = e.target.closest('.nav-tab')?.dataset.tab;
     if (!tab) return;

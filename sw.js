@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'figure-tracker-v25';
+const CACHE_VERSION = 'figure-tracker-v26';
 const APP_SHELL = [
   './',
   './index.html',

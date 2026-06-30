@@ -355,6 +355,38 @@ export function isGifUrl(url = '') {
   return /\.gif(\?|#|$)/i.test(String(url));
 }
 
+export function isGifLikeMedia(media) {
+  const values = [];
+  if (typeof media === 'string') {
+    values.push(media);
+  } else if (media && typeof media === 'object') {
+    if (media.isGif === true) return true;
+    values.push(
+      media.originalMediaType,
+      media.originalMimeType,
+      media.mimeType,
+      media.mediaType,
+      media.type,
+      media.url,
+      media.src,
+      media.videoUrl,
+      media.name,
+      media.originalName
+    );
+  }
+
+  return values
+    .filter(Boolean)
+    .map(value => String(value).toLowerCase())
+    .some(value =>
+      value === 'gif' ||
+      value === 'image/gif' ||
+      value === 'animation' ||
+      value.includes('/animations/') ||
+      value.split(/[?#]/)[0].endsWith('.gif')
+    );
+}
+
 export function getMediaUrl(media) {
   if (!media) return '';
   if (typeof media === 'string') return media;
@@ -385,9 +417,10 @@ export function getMediaKind(media) {
     const url = clean(media.url).toLowerCase();
     const type = clean(media.type).toLowerCase();
 
-    if (mediaType === 'animation' || type === 'animation') return 'animation';
-    if (url.includes('/animations/')) return 'animation';
-    if (mimeType === 'image/gif' || name.endsWith('.gif')) return 'animation';
+    if (isGifLikeMedia(media)) {
+      const mediaUrl = getMediaUrl(media);
+      return isVideoUrl(mediaUrl) || String(mediaUrl).includes('/animations/') ? 'animation' : 'image';
+    }
 
     if (mediaType === 'photo' || mediaType === 'image' || type === 'image') return 'image';
     if (mediaType === 'video' || type === 'video') return 'video';
@@ -398,7 +431,7 @@ export function getMediaKind(media) {
     return detectMediaKind(url || name, mimeType);
   }
 
-  return detectMediaKind(String(media));
+  return isGifLikeMedia(media) ? (isVideoUrl(media) || String(media).includes('/animations/') ? 'animation' : 'image') : detectMediaKind(String(media));
 }
 
 export function renderMediaTag(media, className = '', alt = '') {
@@ -411,20 +444,36 @@ export function renderMediaTag(media, className = '', alt = '') {
   const typeAttr = typeof media === 'object' && media?.mimeType
     ? ` type="${String(media.mimeType).replace(/"/g, '&quot;')}"`
     : '';
+  const stopEvents = 'data-no-card-open="true" onpointerdown="window.stopMediaEvent?.(event);event.stopPropagation()" ontouchstart="window.stopMediaEvent?.(event);event.stopPropagation()"';
+  const previewVideoEvents = `${stopEvents} onclick="window.togglePreviewVideo?.(event);event.stopPropagation()" onplay="window.syncPreviewVideoToggle?.(this)" onpause="window.syncPreviewVideoToggle?.(this)" onended="window.syncPreviewVideoToggle?.(this)"`;
+
+  if (isGifLikeMedia(media)) {
+    if (isVideoUrl(url) || String(url).includes('/animations/')) {
+      return `<video class="${className} media-gif-video" src="${safeUrl}" autoplay loop muted playsinline preload="auto" data-no-card-open="true" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()"></video>`;
+    }
+
+    return `<img class="${className} media-gif-img" src="${safeUrl}" alt="${safeAlt}" loading="lazy" onerror="this.style.opacity='.1'">`;
+  }
 
   if (kind === 'animation') {
     return `
-      <video class="${className}" autoplay loop muted playsinline preload="metadata" onclick="event.stopPropagation()">
-        <source src="${safeUrl}"${typeAttr}>
-      </video>
+      <div class="media-video-preview" data-no-card-open="true">
+        <video class="${className} media-preview-video media-video" loop muted playsinline preload="metadata" ${previewVideoEvents}>
+          <source src="${safeUrl}"${typeAttr}>
+        </video>
+        <button class="media-video-toggle" type="button" aria-label="Play video" onclick="window.togglePreviewVideo?.(event)">▶</button>
+      </div>
     `;
   }
 
   if (kind === 'video') {
     return `
-      <video class="${className}" controls preload="metadata" playsinline onclick="event.stopPropagation()">
-        <source src="${safeUrl}"${typeAttr}>
-      </video>
+      <div class="media-video-preview" data-no-card-open="true">
+        <video class="${className} media-preview-video media-video" preload="metadata" playsinline muted ${previewVideoEvents}>
+          <source src="${safeUrl}"${typeAttr}>
+        </video>
+        <button class="media-video-toggle" type="button" aria-label="Play video" onclick="window.togglePreviewVideo?.(event)">▶</button>
+      </div>
     `;
   }
 
