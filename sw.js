@@ -1,4 +1,4 @@
-﻿const CACHE_VERSION = 'figure-tracker-v8';
+const CACHE_VERSION = 'figure-tracker-v25';
 const APP_SHELL = [
   './',
   './index.html',
@@ -63,7 +63,24 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  if (url.origin === location.origin || OPTIONAL_ASSETS.includes(request.url)) {
+  const isLocalAsset = url.origin === location.origin;
+  const isFreshFirstAsset = isLocalAsset && /\.(?:html?|css|js)$/i.test(url.pathname);
+
+  if (isFreshFirstAsset) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_VERSION);
+      try {
+        const response = await fetch(request);
+        cache.put(request, response.clone());
+        return response;
+      } catch {
+        return caches.match(request);
+      }
+    })());
+    return;
+  }
+
+  if (isLocalAsset || OPTIONAL_ASSETS.includes(request.url)) {
     event.respondWith((async () => {
       const cached = await caches.match(request);
       if (cached) return cached;

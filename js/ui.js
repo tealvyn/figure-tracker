@@ -1,5 +1,5 @@
 ﻿// js/ui.js
-import { state, appState, persist, toEur } from './state.js';
+import { state, appState, persist, schedulePersist, toEur } from './state.js';
 import { H, eur, calcAmiAmiShipping, calcOrder, SCALE_WEIGHTS } from './utils.js';
 import * as API from './api.js';
 import { applyI18n, t } from './i18n.js';
@@ -16,7 +16,128 @@ import {
   renderCollectionHome,
   renderCollectionStatusBar
 } from './collection-view.js';
-import { renderMediaTag, getMediaKind, getImageUrl } from './media-storage.js';
+import { renderMediaTag, getMediaKind, getImageUrl, getMediaUrl, isTelegramFileUrl, refreshTelegramMediaUrl } from './media-storage.js';
+import { buildSearchText, formatReleaseDate, mergeTags, normalizeProductMeta, renderProductMetaBadges, renderProductMetaRows, tagKey } from './product-meta.js';
+
+const GALLERY_PAGE_SIZE = 120;
+const renderQueue = new Map();
+let renderScheduled = false;
+const mediaLookup = new Map();
+
+function getTelegramSettings() {
+  return {
+    tgBotToken: state.settings?.tgBotToken || state.settings?.telegramBotToken || state.settings?.botToken || '',
+    tgChatId: state.settings?.tgChatId || ''
+  };
+}
+
+function shouldUseExternalUrl(url) {
+  return Boolean(url) && !isTelegramFileUrl(String(url));
+}
+
+function mediaKey(value) {
+  if (!value) return '';
+  if (typeof value === 'object') {
+    return String(
+      value.fileId ||
+      value.telegramFileId ||
+      value.url ||
+      value.src ||
+      value.imageUrl ||
+      value.videoUrl ||
+      ''
+    ).trim();
+  }
+  return String(value || '').trim();
+}
+
+function updateTelegramMediaInState(fileId, freshUrl, sourceMedia = {}) {
+  if (!fileId || !freshUrl) return false;
+  let changed = false;
+  const allItems = [...(state.items || []), ...(state.wishlist || [])];
+
+  for (const item of allItems) {
+    const mediaList = Array.isArray(item.media) ? item.media : [];
+    for (const media of mediaList) {
+      if (media?.provider === 'telegram' && media.fileId === fileId) {
+        media.url = freshUrl;
+        media.src = freshUrl;
+        const mediaType = String(media.mediaType || sourceMedia.mediaType || '').toLowerCase();
+        const mimeType = String(media.mimeType || sourceMedia.mimeType || '').toLowerCase();
+        if (mediaType === 'video' || mediaType === 'animation' || mimeType.startsWith('video/')) {
+          media.videoUrl = freshUrl;
+          delete media.imageUrl;
+        } else {
+          media.imageUrl = freshUrl;
+          delete media.videoUrl;
+        }
+        media.refreshedAt = new Date().toISOString();
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
+
+export async function handleMediaLoadError(el) {
+  if (!el) return;
+
+  const provider = el.dataset?.provider || '';
+  const fileId = el.dataset?.fileId || '';
+  if (provider !== 'telegram' || !fileId) {
+    el.style.opacity = '.35';
+    return;
+  }
+
+  if (el.dataset.refreshing === '1') return;
+  el.dataset.refreshing = '1';
+
+  try {
+    const tempMedia = {
+      provider: 'telegram',
+      fileId,
+      mediaType: el.dataset.mediaType || ''
+    };
+    const freshUrl = await refreshTelegramMediaUrl(tempMedia, getTelegramSettings());
+    if (!freshUrl) throw new Error('empty fresh Telegram URL');
+
+    if (el.tagName === 'VIDEO') {
+      el.src = freshUrl;
+      el.querySelectorAll('source').forEach(source => { source.src = freshUrl; });
+      el.load();
+    } else {
+      el.src = freshUrl;
+    }
+
+    if (updateTelegramMediaInState(fileId, freshUrl, tempMedia)) {
+      persist();
+    }
+    el.style.opacity = '1';
+  } catch (error) {
+    console.warn('[handleMediaLoadError]', error);
+    el.style.opacity = '.35';
+  } finally {
+    el.dataset.refreshing = '0';
+  }
+}
+
+window.handleMediaLoadError = handleMediaLoadError;
+
+export function scheduleRender(name, fn) {
+  if (typeof fn !== 'function') return;
+  renderQueue.set(name || fn.name || String(renderQueue.size), fn);
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(() => {
+    try {
+      [...renderQueue.values()].forEach(renderFn => renderFn());
+    } finally {
+      renderQueue.clear();
+      renderScheduled = false;
+    }
+  });
+}
 
 
 export function applyUiTheme() {
@@ -45,6 +166,224 @@ export function toggleTheme() {
 }
 export function toast(message, options = {}) {
   return notifyToast(message, options);
+}
+
+export function stopMedia(root = document, options = {}) {
+  const resetSrc = Boolean(options.resetSrc);
+  root?.querySelectorAll?.('video, audio')?.forEach(media => {
+    try {
+      media.pause();
+      media.currentTime = 0;
+      if (resetSrc) {
+        media.removeAttribute('src');
+        media.querySelectorAll('source').forEach(source => source.removeAttribute('src'));
+        media.load();
+      }
+    } catch (error) {
+      console.warn('Failed to stop media', error);
+    }
+  });
+}
+
+let tagsCache = null;
+
+export function invalidateTagsCache() {
+  tagsCache = null;
+}
+
+export function getAllTags() {
+  if (tagsCache) return tagsCache;
+  const fromItems = (state.items || []).flatMap(item => item.tags || []);
+  const fromWishlist = (state.wishlist || []).flatMap(item => item.tags || []);
+  const fromSettings = state.settings?.tags || state.tags || [];
+  tagsCache = mergeTags(fromSettings, fromItems, fromWishlist).sort((a, b) => a.localeCompare(b));
+  return tagsCache;
+}
+
+export function saveGlobalTags(tags) {
+  state.settings = state.settings || {};
+  state.settings.tags = mergeTags(tags);
+}
+
+export function syncGlobalTags() {
+  invalidateTagsCache();
+  saveGlobalTags(getAllTags());
+}
+
+export function ensureSearchIndexes() {
+  (state.items || []).forEach(item => {
+    if (item && !item._searchText) item._searchText = buildSearchText(item);
+  });
+  (state.wishlist || []).forEach(wish => {
+    if (wish && !wish._searchText) wish._searchText = buildSearchText(wish);
+  });
+}
+
+function searchTextOf(item) {
+  return item?._searchText || buildSearchText(item);
+}
+
+export function getGlobalSearchQuery() {
+  return String(state.search?.global || '').trim().toLowerCase();
+}
+
+function getGlobalSearchWords(query = getGlobalSearchQuery()) {
+  return String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+export function matchesGlobalSearch(item, query = getGlobalSearchQuery()) {
+  const words = getGlobalSearchWords(query);
+  if (!words.length) return true;
+  const searchText = searchTextOf(item);
+  return words.every(word => searchText.includes(word));
+}
+
+export function getGlobalSearchCounts() {
+  const items = (state.items || []).filter(item => matchesGlobalSearch(item));
+  const wishlist = (state.wishlist || []).filter(wish => matchesGlobalSearch(wish));
+  return { collection: items.length, wishlist: wishlist.length, total: items.length + wishlist.length };
+}
+
+export function syncGlobalSearchInput() {
+  const input = document.getElementById('globalSearchInput');
+  if (input && document.activeElement !== input) input.value = state.search?.global || '';
+  renderGlobalSearchCounts();
+}
+
+export function renderGlobalSearchCounts() {
+  const box = document.getElementById('globalSearchCounts');
+  if (!box) return;
+  const query = String(state.search?.global || '').trim();
+  if (!query) { box.textContent = ''; return; }
+  const counts = getGlobalSearchCounts();
+  box.textContent = `Найдено: ${counts.total} · Коллекция: ${counts.collection} · Вишлист: ${counts.wishlist}`;
+}
+
+function globalSearchTextOf(item = {}, type = 'collection') {
+  return [
+    item.name,
+    item.orderNumber,
+    item.orderName,
+    item.store,
+    item.manufacturer,
+    item.region,
+    item.status,
+    item.jan,
+    item.sku,
+    item.code,
+    item.releaseDate,
+    item.shopUrl,
+    item.source,
+    item.sourceUrl,
+    type === 'wishlist' ? item.priority : '',
+    type === 'wishlist' ? (item.notes || item.note) : '',
+    ...(item.tags || [])
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function highlightSearchMatch(text, query) {
+  const source = String(text || '');
+  const needle = String(query || '').trim();
+  if (!needle) return H(source);
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return H(source).replace(new RegExp(`(${escaped})`, 'ig'), '<mark>$1</mark>');
+}
+
+function globalSearchThumb(item) {
+  const entry = mediaEntriesOf(item)[0];
+  if (entry && entry.kind !== 'video') return entry.url;
+  return getImageUrl(item?.imageUrl || item?.img || item?.thumbUrl || '');
+}
+
+function getGlobalSearchResults(query = getGlobalSearchQuery()) {
+  const q = String(query || '').trim().toLowerCase();
+  if (q.length < 2) return [];
+  const words = q.split(/\s+/).filter(Boolean);
+  const matches = (item, type) => {
+    const text = globalSearchTextOf(item, type);
+    return words.every(word => text.includes(word));
+  };
+  const collection = (state.items || [])
+    .filter(item => matches(item, 'collection'))
+    .map(item => ({ type: 'collection', item }));
+  const wishlist = (state.wishlist || [])
+    .filter(item => matches(item, 'wishlist'))
+    .map(item => ({ type: 'wishlist', item }));
+  return [...collection, ...wishlist].slice(0, 10);
+}
+
+export function hideGlobalSearchResults() {
+  const box = document.getElementById('globalSearchResults');
+  if (!box) return;
+  box.hidden = true;
+  box.innerHTML = '';
+  appState.globalSearchResults = [];
+}
+
+export function renderGlobalSearchResults() {
+  const box = document.getElementById('globalSearchResults');
+  if (!box) return;
+  const query = getGlobalSearchQuery();
+  const results = getGlobalSearchResults(query);
+  appState.globalSearchResults = results;
+  if (!results.length) {
+    hideGlobalSearchResults();
+    return;
+  }
+
+  box.innerHTML = results.map((result, index) => {
+    const item = result.item || {};
+    const isWish = result.type === 'wishlist';
+    const thumb = globalSearchThumb(item);
+    const badge = isWish ? '⭐ Вишлист' : '📦 Коллекция';
+    const meta = isWish
+      ? [item.priority, item.manufacturer, item.store].filter(Boolean).join(' · ')
+      : [item.orderNumber || item.orderName, item.status, item.store].filter(Boolean).join(' · ');
+    return `<button class="global-search-result${index === 0 ? ' active' : ''}" type="button" data-result-index="${index}">
+      ${thumb ? `<img class="global-search-result-img" src="${H(thumb)}" alt="" loading="lazy" onerror="this.style.opacity='.2'">` : `<span class="global-search-result-img"></span>`}
+      <span class="global-search-result-body">
+        <span class="global-search-result-badge">${badge}</span>
+        <span class="global-search-result-name">${highlightSearchMatch(item.name || '—', query)}</span>
+        <span class="global-search-result-meta">${highlightSearchMatch(meta || '—', query)}</span>
+      </span>
+    </button>`;
+  }).join('');
+  box.hidden = false;
+}
+
+export function openGlobalSearchResult(index = 0) {
+  const result = appState.globalSearchResults?.[Number(index)];
+  if (!result?.item?.id) return;
+  hideGlobalSearchResults();
+  if (result.type === 'wishlist') openWishModal(result.item.id);
+  else openModal(result.item.id);
+}
+
+export function handleGlobalSearchKeydown(event) {
+  if (event.key === 'Escape') {
+    hideGlobalSearchResults();
+    return;
+  }
+  if (event.key === 'Enter') {
+    const results = appState.globalSearchResults || [];
+    if (!results.length) return;
+    event.preventDefault();
+    openGlobalSearchResult(0);
+  }
+}
+
+export function setGlobalSearch(value) {
+  state.search = state.search || {};
+  state.search.global = String(value || '');
+  appState.selectedOrder = null;
+  resetGalleryPagination();
+  schedulePersist();
+  scheduleRender('main', render);
+  scheduleRender('wishlist', renderWishlist);
+  scheduleRender('gallery', renderGallery);
+  scheduleRender('shelf', renderShelf);
+  renderGlobalSearchCounts();
+  renderGlobalSearchResults();
 }
 
 export function showRatesBadge() {
@@ -110,7 +449,7 @@ export function deleteLocalBackup(id) {
 
 
 const ITEM_DRAFT_KEY = 'fctV2ItemDraft';
-const ITEM_DRAFT_FIELDS = ['fName', 'fOrder', 'fOrderName', 'fStore', 'fImg', 'fShopUrl', 'fPrice', 'fShipping', 'fDeposit', 'fMaker', 'fDateYear', 'fTags', 'fTracking', 'fOrderDate', 'fShipDate', 'fScale', 'fCurrency', 'fRegion', 'fStatus', 'fDateMonth', 'fShipMethod'];
+const ITEM_DRAFT_FIELDS = ['fName', 'fOrder', 'fOrderName', 'fStore', 'fImg', 'fShopUrl', 'fPrice', 'fShipping', 'fDeposit', 'fMaker', 'fDateYear', 'fTags', 'fTracking', 'fOrderDate', 'fShipDate', 'fScale', 'fCurrency', 'fRegion', 'fStatus', 'fDateMonth', 'fShipMethod', 'fJan', 'fSku', 'fPreorderStart', 'fPreorderEnd', 'fReleaseStatus', 'fSource', 'fSourceUrl'];
 const ITEM_DRAFT_REQUIRED_SIGNAL = ['fName', 'fOrder', 'fOrderName', 'fImg', 'fShopUrl', 'fPrice', 'fShipping', 'fDeposit', 'fMaker', 'fDateYear', 'fTags', 'fTracking', 'fOrderDate', 'fShipDate', 'fScale'];
 
 function readItemDraft() {
@@ -293,7 +632,7 @@ export function badgeClass(status) {
 }
 
 export function getFiltered() {
-  const q = document.getElementById('searchInput')?.value.trim().toLowerCase() || '';
+  const words = getGlobalSearchWords();
   const storeF = document.getElementById('filterStore')?.value || '';
   const regionF = document.getElementById('filterRegion')?.value || '';
   const showHidden = document.getElementById('showHiddenToggle')?.checked || false;
@@ -304,9 +643,9 @@ export function getFiltered() {
     if (appState.filterStatus && orderStatus(order) !== appState.filterStatus) return false;
     if (storeF && (order.store || '') !== storeF) return false;
     if (regionF && (order.items[0]?.region || '') !== regionF) return false;
-    if (!q) return true;
-    const hay = [order.orderName, order.orderNumber, order.store, ...order.items.flatMap(i => [i.name, i.manufacturer, i.releaseDate, ...(i.tags || [])])].join(' ').toLowerCase();
-    return hay.includes(q);
+    if (!words.length) return true;
+    const orderText = [order.orderName, order.orderNumber, order.store].join(' ').toLowerCase();
+    return words.every(word => orderText.includes(word) || order.items.some(item => searchTextOf(item).includes(word)));
   });
 }
 
@@ -326,23 +665,36 @@ export function renderSidebar() {
       <div class="order-footer"><span class="order-total">${eur(c.total)}</span>${c.remaining > 0 ? `<span class="order-remain">Остаток: ${eur(c.remaining)}</span>` : '<span style="font-size:12px;color:var(--green)">✓ Оплачено</span>'}</div>
     </div>`;
   }).join('');
-  list.querySelectorAll('.order-item').forEach(el => el.addEventListener('click', () => { appState.selectedOrder = el.dataset.order; render(); }));
+  if (list.dataset.bound !== '1') {
+    list.dataset.bound = '1';
+    list.addEventListener('click', event => {
+      const item = event.target.closest('.order-item');
+      if (!item) return;
+      appState.selectedOrder = item.dataset.order;
+      scheduleRender('main', render);
+    });
+  }
 }
 
 export function syncMobileCollectionView() {
   const sidebar = document.querySelector('.sidebar');
   const detailPane = document.getElementById('detailPane');
+  const mainPane = document.querySelector('.main');
   if (!sidebar || !detailPane) return;
 
   const isMobile = window.matchMedia('(max-width: 768px)').matches;
   if (!isMobile || appState.currentTab !== 'collection') {
     sidebar.classList.remove('hidden-mobile');
     detailPane.classList.remove('hidden-mobile');
+    mainPane?.classList.remove('mobile-list-mode', 'mobile-detail-mode');
     return;
   }
 
-  sidebar.classList.toggle('hidden-mobile', Boolean(appState.selectedOrder));
-  detailPane.classList.toggle('hidden-mobile', !appState.selectedOrder);
+  const hasSelectedOrder = Boolean(appState.selectedOrder);
+  sidebar.classList.toggle('hidden-mobile', hasSelectedOrder);
+  detailPane.classList.toggle('hidden-mobile', !hasSelectedOrder);
+  mainPane?.classList.toggle('mobile-list-mode', !hasSelectedOrder);
+  mainPane?.classList.toggle('mobile-detail-mode', hasSelectedOrder);
 }
 
 export function backToOrders() {
@@ -380,21 +732,21 @@ export function renderDetail() {
   const order = getOrders().find(o => o.orderNumber === appState.selectedOrder);
   if (!order) { appState.selectedOrder = null; renderDetail(); return; }
   const c = calcOrder(order); const status = orderStatus(order);
-  const figures = order.items.map(item => {
+  const figures = order.items.map((rawItem, itemIndex) => {
+    const item = normalizeProductMeta(rawItem);
     const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
-    return `<div class="figure-card animate-in" style="animation-delay:${order.items.indexOf(item) * 40}ms" onclick="openModal('${H(item.id)}')">
-  ${renderMediaTag(item.imageUrl || item.img || item.videoUrl, 'figure-img', item.name)}
+    const firstMedia = mediaEntriesOf(item)[0]?.media || item.imageUrl || item.img || item.videoUrl;
+    return `<div class="figure-card animate-in" style="animation-delay:${itemIndex * 40}ms" onclick="openModal('${H(item.id)}')">
+  ${renderMediaTag(firstMedia, 'figure-img', item.name)}
   <div class="figure-body">
     <div class="figure-name">${H(item.name)}</div>
-    <div class="figure-meta">🏭 ${H(item.manufacturer || '—')}</div>
-    <div class="figure-meta">📅 Выход: ${H(item.releaseDate || '—')}</div>
+    ${item.store ? `<div class="figure-meta">Магазин: ${H(item.store)}</div>` : ''}
+    ${item.manufacturer ? `<div class="figure-meta">Производитель: ${H(item.manufacturer)}</div>` : ''}
+    ${item.releaseDate ? `<div class="figure-meta">Выход: ${H(item.releaseDate)}</div>` : ''}
     <div class="figure-meta">💱 ${H(String(item.priceOriginal ?? '—'))} ${H(item.currency || '')}${item.currency && item.currency !== 'EUR' ? ` → <span style="color:var(--accent)">${eur(priceEur)}</span>` : ''}</div>
+    <div class="product-badges">${renderProductMetaBadges(item)}</div>
     ${item.shopUrl ? `<a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--accent);text-decoration:none;margin-top:6px;margin-bottom:2px;">🔗 Открыть в магазине</a>` : ''}
     ${item.tags?.length ? `<div class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</div>` : ''}
-    <div class="figure-card-actions">
-      <button class="btn btn-sm" onclick="event.stopPropagation(); editItem('${H(item.id)}')">Редактировать</button>
-      <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteItem('${H(item.id)}')">Удалить</button>
-    </div>
   </div>
 </div>`;
   }).join('');
@@ -466,16 +818,21 @@ export function openForm(options = {}) {
 }
 
 export function closeForm() {
+  stopMedia(document.getElementById('formOverlay'), { resetSrc: false });
   document.getElementById('formOverlay').style.display = 'none';
   appState.editingId = null;
   clearForm();
 }
 
 export function clearForm() {
-  ['fName', 'fOrder', 'fOrderName', 'fStore', 'fImg', 'fShopUrl', 'fPrice', 'fShipping', 'fDeposit', 'fMaker', 'fDateYear', 'fTags', 'fTracking', 'fOrderDate', 'fShipDate', 'fScale'].forEach(id => document.getElementById(id).value = '');
+  ['fName', 'fOrder', 'fOrderName', 'fStore', 'fImg', 'fShopUrl', 'fPrice', 'fShipping', 'fDeposit', 'fMaker', 'fDateYear', 'fTags', 'fTracking', 'fOrderDate', 'fShipDate', 'fScale', 'fJan', 'fSku', 'fPreorderStart', 'fPreorderEnd', 'fSource', 'fSourceUrl'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   document.getElementById('fCurrency').value = 'JPY';
   document.getElementById('fRegion').value = 'Япония';
   document.getElementById('fStatus').value = 'Не оплачено';
+  if (document.getElementById('fReleaseStatus')) document.getElementById('fReleaseStatus').value = 'unknown';
   document.getElementById('eurPreview').textContent = '';
   document.getElementById('formTitle').dataset.i18n = 'form.addFigure';
   document.getElementById('formTitle').textContent = t('form.addFigure');
@@ -500,8 +857,9 @@ export function addToOrder(orderNum, orderName, store, region) {
 }
 
 export function editItem(id) {
-  const item = state.items.find(i => i.id === id);
-  if (!item) return;
+  const rawItem = state.items.find(i => i.id === id);
+  if (!rawItem) return;
+  const item = normalizeProductMeta(rawItem);
   appState.editingId = id;
   appState.pendingUploadedMedia = [];
   document.getElementById('fName').value = item.name || '';
@@ -510,7 +868,8 @@ export function editItem(id) {
   document.getElementById('fStore').value = item.store || '';
   document.getElementById('fRegion').value = item.region || 'Япония';
   document.getElementById('fMaker').value = item.manufacturer || '';
-  const _dp = (item.releaseDate || '').split(' ');
+  const _formattedRelease = formatReleaseDate(item.releaseDate || '');
+  const _dp = _formattedRelease.split(' ');
   document.getElementById('fDateMonth').value = _dp[0] || '';
   document.getElementById('fDateYear').value = _dp[1] || '';
   document.getElementById('fTracking').value = item.tracking || '';
@@ -526,6 +885,13 @@ export function editItem(id) {
   document.getElementById('fDeposit').value = item.deposit || '';
   document.getElementById('fStatus').value = item.status || 'Не оплачено';
   document.getElementById('fTags').value = (item.tags || []).join(', ');
+  document.getElementById('fJan').value = item.jan || '';
+  document.getElementById('fSku').value = item.sku || item.code || '';
+  document.getElementById('fPreorderStart').value = item.preorderStart || '';
+  document.getElementById('fPreorderEnd').value = item.preorderEnd || '';
+  document.getElementById('fReleaseStatus').value = item.releaseStatus || 'unknown';
+  document.getElementById('fSource').value = item.source || '';
+  document.getElementById('fSourceUrl').value = item.sourceUrl || '';
   document.getElementById('formTitle').dataset.i18n = 'form.editFigure';
   document.getElementById('formTitle').textContent = t('form.editFigure');
   updateEurPreview(); openForm();
@@ -535,6 +901,7 @@ export function deleteItem(id) {
   if (!confirm('Удалить эту фигурку?')) return;
   createLocalBackup('before-delete-item', true);
   state.items = state.items.filter(i => i.id !== id);
+  syncGlobalTags();
   if (!getOrders().find(o => o.orderNumber === appState.selectedOrder)) appState.selectedOrder = null;
   persist(); render(); toast('Удалено');
 }
@@ -543,11 +910,28 @@ function mergeMediaByUrl(...lists) {
   const map = new Map();
   for (const list of lists) {
     for (const media of list || []) {
-      const url = getImageUrl(media);
-      if (url && !map.has(url)) map.set(url, media);
+      const key = mediaKey(media);
+      if (key && !map.has(key)) map.set(key, media);
     }
   }
   return [...map.values()];
+}
+
+function mediaUrlSet(mediaList = []) {
+  const urls = new Set();
+  for (const media of mediaList || []) {
+    if (!media) continue;
+    if (typeof media === 'object') {
+      [media.url, media.src, media.imageUrl, media.videoUrl, getMediaUrl(media)]
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+        .forEach(url => urls.add(url));
+    } else {
+      const url = String(media || '').trim();
+      if (url) urls.add(url);
+    }
+  }
+  return urls;
 }
 
 export function saveItem() {
@@ -556,9 +940,18 @@ export function saveItem() {
   if (!name) { alert('Укажи название фигурки'); return; }
   if (!orderNumber) { alert('Укажи номер заказа'); return; }
   const existingItem = appState.editingId ? state.items.find(i => i.id === appState.editingId) : null;
-  const imageUrls = document.getElementById('fImg').value.split(',').map(s => s.trim()).filter(Boolean);
   const uploadedMedia = appState.pendingUploadedMedia || [];
-  const item = {
+  const media = mergeMediaByUrl(
+    existingItem?.media || [],
+    existingItem?.images || [],
+    uploadedMedia
+  );
+  const mediaUrls = mediaUrlSet(media);
+  const imageUrls = document.getElementById('fImg').value
+    .split(',')
+    .map(s => s.trim())
+    .filter(url => shouldUseExternalUrl(url) && !mediaUrls.has(url));
+  const item = normalizeProductMeta({
     id: appState.editingId || crypto.randomUUID(),
     name, orderNumber,
     orderName: document.getElementById('fOrderName').value.trim() || orderNumber,
@@ -572,9 +965,17 @@ export function saveItem() {
     orderDate: document.getElementById('fOrderDate').value,
     shipDate: document.getElementById('fShipDate').value,
     imageUrls,
-    imageUrl: imageUrls[0] || '',
-    media: mergeMediaByUrl(existingItem?.media || [], uploadedMedia),
+    imageUrl: imageUrls[0] || existingItem?.imageUrl || '',
+    media,
     shopUrl: document.getElementById('fShopUrl').value.trim(),
+    jan: document.getElementById('fJan')?.value.trim() || '',
+    sku: document.getElementById('fSku')?.value.trim() || '',
+    code: document.getElementById('fSku')?.value.trim() || '',
+    preorderStart: document.getElementById('fPreorderStart')?.value.trim() || '',
+    preorderEnd: document.getElementById('fPreorderEnd')?.value.trim() || '',
+    releaseStatus: document.getElementById('fReleaseStatus')?.value || 'unknown',
+    source: document.getElementById('fSource')?.value.trim() || '',
+    sourceUrl: document.getElementById('fSourceUrl')?.value.trim() || '',
     priceOriginal: parseFloat(document.getElementById('fPrice').value) || 0,
     currency: document.getElementById('fCurrency').value,
     shippingEur: parseFloat(document.getElementById('fShipping').value) || 0,
@@ -585,11 +986,12 @@ export function saveItem() {
     rateAtSaveDate: appState.editingId ? (existingItem?.rateAtSaveDate || new Date().toLocaleDateString('ru')) : new Date().toLocaleDateString('ru'),
     createdAt: appState.editingId ? (existingItem?.createdAt || Date.now()) : Date.now(),
     hidden: appState.editingId ? (existingItem?.hidden || false) : false
-  };
+  });
   const wasEditing = Boolean(appState.editingId);
   if (item.tracking && item.status !== 'Получено' && item.status !== 'В пути') { item.status = 'В пути'; }
   if (appState.editingId) { const idx = state.items.findIndex(i => i.id === appState.editingId); state.items[idx] = item; }
   else state.items.push(item);
+  syncGlobalTags();
   appState.selectedOrder = orderNumber;
   appState.pendingUploadedMedia = [];
   if (!wasEditing) clearItemDraft();
@@ -616,6 +1018,7 @@ export function loadSettings() {
 }
 
 export function saveSettings() {
+  const existingTags = getAllTags();
   state.settings = {
     region: document.getElementById('sRegion').value,
     currency: document.getElementById('sCurrency').value,
@@ -623,6 +1026,8 @@ export function saveSettings() {
     shipMethod: document.getElementById('sShipMethod').value,
     density: document.getElementById('sDensity')?.value || state.settings?.density || 'compact',
     theme: document.getElementById('sTheme')?.value || state.settings?.theme || 'cyberpunk',
+    tags: existingTags,
+    gallery: state.settings?.gallery || {},
     scriptUrl: document.getElementById('sScriptUrl').value.trim(),
     tgBotToken: document.getElementById('sTgBotToken').value.trim(),
     tgChatId: document.getElementById('sTgChatId').value.trim()
@@ -636,6 +1041,7 @@ export function clearAllData() {
   if (!confirm('Ты уверен? Все фигурки и вишлист будут удалены.')) return;
   createLocalBackup('before-clear', true);
   state.items = []; state.wishlist = [];
+  syncGlobalTags();
   appState.selectedOrder = null;
   persist(); render(); toast('🗑️ Все данные удалены');
 }
@@ -800,37 +1206,64 @@ export function receiveWholeOrder(orderNumber) {
 }
 
 export function renderTagSuggestions() {
-  const allTags = [...new Set(state.items.flatMap(i => i.tags || []).filter(Boolean))].sort();
-  const input = document.getElementById('fTags');
-  const container = document.getElementById('tagSuggestions');
-  if (!container || !input) return;
-  const current = input.value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
-  const suggestions = allTags.filter(t => !current.includes(t.toLowerCase()));
-  if (!suggestions.length) { container.innerHTML = ''; return; }
-  container.innerHTML = suggestions.map(tag => `<span onclick="addTag('${H(tag)}')" style="background:rgba(103,232,249,.1);border:1px solid rgba(103,232,249,.2);color:var(--accent);border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;">+ ${H(tag)}</span>`).join('');
+  renderTagButtons('fTags', 'tagSuggestions');
+  renderTagButtons('wTags', 'wishTagSuggestions');
 }
 
-export function addTag(tag) {
-  const input = document.getElementById('fTags');
+function renderTagButtons(inputId, containerId) {
+  const allTags = getAllTags();
+  const input = document.getElementById(inputId);
+  const container = document.getElementById(containerId);
+  if (!container || !input) return;
+  const current = input.value.split(',').map(t => tagKey(t)).filter(Boolean);
+  const suggestions = allTags.filter(t => !current.includes(tagKey(t)));
+  if (!suggestions.length) { container.innerHTML = ''; return; }
+  container.innerHTML = suggestions.map(tag => `<button type="button" class="tag-suggestion-chip" data-tag="${H(tag)}">+ ${H(tag)}</button>`).join('');
+  container.querySelectorAll('[data-tag]').forEach(btn => {
+    btn.addEventListener('click', () => addTag(btn.dataset.tag, inputId));
+  });
+}
+
+export function addTag(tag, inputId = 'fTags') {
+  const input = document.getElementById(inputId);
+  if (!input) return;
   const current = input.value.split(',').map(t => t.trim()).filter(Boolean);
-  if (!current.includes(tag)) { current.push(tag); input.value = current.join(', '); }
+  if (!current.some(t => tagKey(t) === tagKey(tag))) { current.push(tag); input.value = current.join(', '); }
   renderTagSuggestions();
 }
 
+function isGalleryHiddenItem(item = {}) {
+  return item.hidden === true || item.isHidden === true || item.galleryHidden === true || item.visibility === 'hidden';
+}
+
+export function setGalleryShowHidden(value) {
+  state.settings = state.settings || {};
+  state.settings.gallery = state.settings.gallery || {};
+  state.settings.gallery.showHidden = Boolean(value);
+  schedulePersist();
+  scheduleRender('gallery', renderGallery);
+}
+
 export function renderGallery() {
-  const q = (document.getElementById('gallerySearch')?.value || '').trim().toLowerCase();
   const sort = document.getElementById('gallerySort')?.value || 'newest';
   const makerF = document.getElementById('galleryMaker')?.value || '';
-  let items = state.items.filter(i => !i.hidden);
+  const showHiddenEl = document.getElementById('galleryShowHidden');
+  if (showHiddenEl && showHiddenEl.dataset.initialized !== '1') {
+    showHiddenEl.checked = Boolean(state.settings?.gallery?.showHidden);
+    showHiddenEl.dataset.initialized = '1';
+  }
+  const showHidden = showHiddenEl ? showHiddenEl.checked : Boolean(state.settings?.gallery?.showHidden);
+  let items = state.items.filter(i => showHidden || !isGalleryHiddenItem(i));
 
-  const makers = [...new Set(items.map(i => i.manufacturer).filter(Boolean))].sort();
+  const makerSource = state.items.filter(i => showHidden || !isGalleryHiddenItem(i));
+  const makers = [...new Set(makerSource.map(i => i.manufacturer).filter(Boolean))].sort();
   const makerSel = document.getElementById('galleryMaker');
   if (makerSel) {
     const cur = makerSel.value;
     makerSel.innerHTML = `<option value="">${t('gallery.allMakers')}</option>` + makers.map(m => `<option value="${H(m)}" ${m === cur ? 'selected' : ''}>${H(m)}</option>`).join('');
   }
 
-  if (q) items = items.filter(i => [i.name, i.manufacturer, i.store, ...(i.tags || [])].join(' ').toLowerCase().includes(q));
+  items = items.filter(i => matchesGlobalSearch(i));
   if (makerF) items = items.filter(i => i.manufacturer === makerF);
 
   items.sort((a, b) => {
@@ -854,11 +1287,17 @@ if (!items.length) {
   return;
 }
 
+const totalMediaCount = items.reduce((sum, item) => sum + Math.max(1, mediaEntriesOf(item).length), 0);
+const visibleCount = appState.galleryVisibleCount || GALLERY_PAGE_SIZE;
+let renderedMediaCount = 0;
+
 grid.innerHTML = items.map((item, idx) => {
+  if (renderedMediaCount >= visibleCount) return '';
   const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
-  const imgs = mediaUrlsOf(item);
+  const imgs = mediaEntriesOf(item);
 
   if (imgs.length === 0) {
+    renderedMediaCount += 1;
     return `<div class="gallery-card animate-in" style="animation-delay:${idx * 20}ms; position: relative; aspect-ratio: 1;" onclick="openModal('${H(item.id)}')">
       <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:40px; opacity:0.3; background:#111;">📦</div>
       <div class="gallery-overlay">
@@ -868,24 +1307,26 @@ grid.innerHTML = items.map((item, idx) => {
     </div>`;
   }
 
-  return imgs.map((img, imgIdx) => {
-    const kind = getMediaKind(img);
+  const visibleImgs = imgs.slice(0, Math.max(0, visibleCount - renderedMediaCount));
+  renderedMediaCount += visibleImgs.length;
+
+  return visibleImgs.map((img, imgIdx) => {
+    const kind = img.kind;
+    const mediaUrl = img.url;
+    const mediaTag = renderMediaTag(img.media, 'gallery-media', item.name)
+      .replace('class="gallery-media"', `class="gallery-media" data-media-url="${H(mediaUrl)}"`);
 
     const mediaHtml = kind === 'animation'
       ? `<div class="gallery-video-wrap">
-          <video class="gallery-media" data-media-url="${H(img)}" autoplay loop muted playsinline preload="metadata" onclick="event.stopPropagation()">
-            <source src="${H(img)}">
-          </video>
-          <button class="media-open-btn" onclick="event.stopPropagation(); openLightbox('${H(img)}', 'gallery')">⛶</button>
+          ${mediaTag}
+          <button class="icon-action-btn media-open-btn" type="button" title="Открыть" onclick="event.stopPropagation(); openLightbox('${H(mediaUrl)}', 'gallery')">⛶</button>
         </div>`
       : kind === 'video'
         ? `<div class="gallery-video-wrap">
-            <video class="gallery-media" data-media-url="${H(img)}" controls preload="metadata" playsinline onclick="event.stopPropagation()">
-              <source src="${H(img)}">
-            </video>
-            <button class="media-open-btn" onclick="event.stopPropagation(); openLightbox('${H(img)}', 'gallery')">⛶</button>
+            ${mediaTag}
+            <button class="icon-action-btn media-open-btn" type="button" title="Открыть" onclick="event.stopPropagation(); openLightbox('${H(mediaUrl)}', 'gallery')">⛶</button>
           </div>`
-        : `<img class="gallery-media zoomable" data-media-url="${H(img)}" src="${H(img)}" loading="lazy" alt="${H(item.name)}" onerror="this.closest('.gallery-card').style.display='none'" onclick="event.stopPropagation(); openLightbox('${H(img)}', 'gallery')">`;
+        : `<img class="gallery-media zoomable" data-media-url="${H(mediaUrl)}" src="${H(mediaUrl)}" loading="lazy" alt="${H(item.name)}" data-provider="${H(img.media?.provider || '')}" data-file-id="${H(img.media?.fileId || '')}" data-media-type="${H(img.media?.mediaType || '')}" onerror="handleMediaLoadError(this)" onclick="event.stopPropagation(); openLightbox('${H(mediaUrl)}', 'gallery')">`;
 
     return `<div class="gallery-card animate-in" style="animation-delay:${(idx + imgIdx) * 20}ms; position: relative; align-self: start;" onclick="openModal('${H(item.id)}')">
       ${mediaHtml}
@@ -896,6 +1337,21 @@ grid.innerHTML = items.map((item, idx) => {
     </div>`;
   }).join('');
 }).join('');
+
+if (renderedMediaCount < totalMediaCount) {
+  grid.innerHTML += `<div style="break-inside:avoid;display:flex;justify-content:center;padding:18px 0 30px;">
+    <button type="button" class="btn btn-primary btn-sm" onclick="showMoreGallery()">Показать ещё (${Math.min(GALLERY_PAGE_SIZE, totalMediaCount - renderedMediaCount)} из ${totalMediaCount - renderedMediaCount})</button>
+  </div>`;
+}
+}
+
+export function showMoreGallery() {
+  appState.galleryVisibleCount = (appState.galleryVisibleCount || GALLERY_PAGE_SIZE) + GALLERY_PAGE_SIZE;
+  renderGallery();
+}
+
+export function resetGalleryPagination() {
+  appState.galleryVisibleCount = GALLERY_PAGE_SIZE;
 }
 
 export function checkReleaseReminders() {
@@ -954,28 +1410,54 @@ export function saveWish(...args) { return WishlistView.saveWish(...args); }
 export function deleteWish(...args) { return WishlistView.deleteWish(...args); }
 
 export function moveWishToCollection(id) {
-  const w = (state.wishlist || []).find(x => x.id === id); if (!w) return;
+  const rawWish = (state.wishlist || []).find(x => x.id === id); if (!rawWish) return;
+  const w = normalizeProductMeta(rawWish);
   closeModal();
   document.getElementById('fName').value = w.name || ''; document.getElementById('fStore').value = w.store || ''; document.getElementById('fMaker').value = w.manufacturer || '';
   const _dp = (w.releaseDate || '').split(' '); document.getElementById('fDateMonth').value = _dp[0] || ''; document.getElementById('fDateYear').value = _dp[1] || '';
   document.getElementById('fImg').value = (w.imageUrls?.length ? w.imageUrls : (w.imageUrl ? [w.imageUrl] : [])).join(', '); document.getElementById('fShopUrl').value = w.shopUrl || '';
   document.getElementById('fPrice').value = w.priceOriginal || ''; document.getElementById('fCurrency').value = w.currency || 'JPY'; document.getElementById('fTags').value = (w.tags || []).join(', ');
+  document.getElementById('fJan').value = w.jan || '';
+  document.getElementById('fSku').value = w.sku || w.code || '';
+  document.getElementById('fPreorderStart').value = w.preorderStart || '';
+  document.getElementById('fPreorderEnd').value = w.preorderEnd || '';
+  document.getElementById('fReleaseStatus').value = w.releaseStatus || 'unknown';
+  document.getElementById('fSource').value = w.source || '';
+  document.getElementById('fSourceUrl').value = w.sourceUrl || '';
   updateEurPreview();
   switchTab('collection');
   document.getElementById('formTitle').dataset.i18n = 'form.addFigure'; document.getElementById('formTitle').textContent = t('form.addFigure'); appState.editingId = null; document.getElementById('formOverlay').style.display = 'flex'; toast('Заполни заказ и сохрани — фигурка перейдёт в коллекцию');
 }
 
 function mediaUrlsOf(item) {
-  const urls = [];
+  return mediaEntriesOf(item).map(entry => entry.url);
+}
+
+function mediaEntriesOf(item) {
+  const entries = [];
+  const seen = new Set();
   const add = value => {
-    const url = getImageUrl(value);
-    if (url && !urls.includes(url)) urls.push(url);
+    const url = getMediaUrl(value);
+    const key = mediaKey(value) || url;
+    if (!url || seen.has(key)) return;
+    seen.add(key);
+    const media = value && typeof value === 'object' ? value : url;
+    if (value && typeof value === 'object') mediaLookup.set(url, value);
+    entries.push({ url, media, kind: getMediaKind(media) });
   };
-  (item?.imageUrls || []).forEach(add);
-  add(item?.imageUrl);
-  add(item?.img);
+
+  (item?.imageUrls || []).filter(shouldUseExternalUrl).forEach(add);
   (item?.media || []).forEach(add);
-  return urls;
+
+  if (shouldUseExternalUrl(item?.imageUrl)) add(item.imageUrl);
+  if (shouldUseExternalUrl(item?.img)) add(item.img);
+
+  return entries;
+}
+
+function mediaForUrl(value) {
+  const url = getMediaUrl(value);
+  return mediaLookup.get(url) || value;
 }
 
 function renderClickableMedia(url, className = '', alt = '', lightboxContext = 'gallery') {
@@ -987,19 +1469,21 @@ function renderClickableMedia(url, className = '', alt = '', lightboxContext = '
     return renderMediaTag(url, className, alt);
   }
 
-  return `<img class="${className} zoomable" data-media-url="${H(url)}" src="${H(url)}" loading="lazy" alt="${H(alt || '')}" onerror="this.style.opacity='.1'" onclick="event.stopPropagation();openLightbox('${H(url)}','${H(lightboxContext)}')">`;
+  return `<img class="${className} zoomable" data-media-url="${H(url)}" src="${H(url)}" loading="lazy" alt="${H(alt || '')}" onerror="handleMediaLoadError(this)" onclick="event.stopPropagation();openLightbox('${H(url)}','${H(lightboxContext)}')">`;
 }
 
 export function editWish(...args) { return WishlistView.editWish(...args); }
 export function renderWishlist(...args) { return WishlistView.renderWishlist(...args); }
 export function openWishModal(...args) { return WishlistView.openWishModal(...args); }
 
-function setModalMedia(url, alt = '') {
+function setModalMedia(media, alt = '') {
   const oldEl = document.getElementById('modalImg');
   if (!oldEl) return;
+  stopMedia(oldEl.parentElement || document.getElementById('modalOverlay'), { resetSrc: true });
 
-  const safeUrl = String(url || '');
-  const kind = getMediaKind(safeUrl);
+  const resolvedMedia = mediaForUrl(media);
+  const safeUrl = String(getMediaUrl(resolvedMedia) || '');
+  const kind = getMediaKind(resolvedMedia);
 
   let newEl;
 
@@ -1035,17 +1519,31 @@ function setModalMedia(url, alt = '') {
   // zoomable только для фото, не для видео/gif-анимаций
   newEl.className = 'modal-img ' + (safeUrl && kind === 'image' ? 'zoomable' : '');
 
+  if (resolvedMedia && typeof resolvedMedia === 'object') {
+    if (resolvedMedia.provider) newEl.dataset.provider = resolvedMedia.provider;
+    if (resolvedMedia.fileId) newEl.dataset.fileId = resolvedMedia.fileId;
+    if (resolvedMedia.mediaType) newEl.dataset.mediaType = resolvedMedia.mediaType;
+  }
+  newEl.onerror = () => handleMediaLoadError(newEl);
+  if (resolvedMedia && typeof resolvedMedia === 'object') {
+    if (resolvedMedia.provider) newEl.dataset.provider = resolvedMedia.provider;
+    if (resolvedMedia.fileId) newEl.dataset.fileId = resolvedMedia.fileId;
+    if (resolvedMedia.mediaType) newEl.dataset.mediaType = resolvedMedia.mediaType;
+  }
+  newEl.onerror = () => handleMediaLoadError(newEl);
   newEl.style.display = safeUrl ? 'block' : 'none';
 
   oldEl.replaceWith(newEl);
 }
 
-function setLightboxMedia(url, alt = '') {
+function setLightboxMedia(media, alt = '') {
   const oldEl = document.getElementById('lightboxImg');
   if (!oldEl) return;
+  stopMedia(document.getElementById('lightboxOverlay'), { resetSrc: true });
 
-  const safeUrl = String(url || '');
-  const kind = getMediaKind(safeUrl);
+  const resolvedMedia = mediaForUrl(media);
+  const safeUrl = String(getMediaUrl(resolvedMedia) || '');
+  const kind = getMediaKind(resolvedMedia);
 
   let newEl;
 
@@ -1089,20 +1587,20 @@ function setLightboxMedia(url, alt = '') {
 
 export function openModal(id) {
   document.getElementById('modalMove').style.display = 'none';
-  const item = state.items.find(i => i.id === id); if (!item) return;
+  const rawItem = state.items.find(i => i.id === id); if (!rawItem) return;
+  const item = normalizeProductMeta(rawItem);
   appState.modalItemId = id;
   const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
   document.getElementById('modalName').textContent = item.name || '—';
-  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">Заказ</span><span>#${H(item.orderNumber)} — ${H(item.orderName || '')}</span></div><div class="modal-row"><span class="modal-label">Магазин</span><span>${H(item.store || '—')}</span></div><div class="modal-row"><span class="modal-label">Регион</span><span>${H(item.region || '—')}</span></div><div class="modal-row"><span class="modal-label">Производитель</span><span>${H(item.manufacturer || '—')}</span></div><div class="modal-row"><span class="modal-label">Дата выхода</span><span>${H(item.releaseDate || '—')}</span></div><div class="modal-row"><span class="modal-label">Цена</span><span>${item.priceOriginal} ${item.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div><div class="modal-row"><span class="modal-label">Доставка</span><span>€${Number(item.shippingEur || 0).toFixed(2)}</span></div><div class="modal-row"><span class="modal-label">Предоплата</span><span>€${Number(item.deposit || 0).toFixed(2)}</span></div>${item.tags?.length ? `<div class="modal-row"><span class="modal-label">Теги</span><span class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${item.shopUrl ? `<div class="modal-row"><span class="modal-label">Страница товара</span><a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">Открыть в магазине</a></div>` : ''}
+  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">Заказ</span><span>#${H(item.orderNumber)} — ${H(item.orderName || '')}</span></div><div class="modal-row"><span class="modal-label">Магазин</span><span>${H(item.store || '—')}</span></div><div class="modal-row"><span class="modal-label">Регион</span><span>${H(item.region || '—')}</span></div><div class="modal-row"><span class="modal-label">Производитель</span><span>${H(item.manufacturer || '—')}</span></div><div class="modal-row"><span class="modal-label">Цена</span><span>${item.priceOriginal} ${item.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div><div class="modal-row"><span class="modal-label">Доставка</span><span>€${Number(item.shippingEur || 0).toFixed(2)}</span></div><div class="modal-row"><span class="modal-label">Предоплата</span><span>€${Number(item.deposit || 0).toFixed(2)}</span></div>${renderProductMetaRows(item)}${item.tags?.length ? `<div class="modal-row"><span class="modal-label">Теги</span><span class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${item.shopUrl ? `<div class="modal-row"><span class="modal-label">Страница товара</span><a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">Открыть в магазине</a></div>` : ''}
   ${(item.rateAtSave && item.currency !== 'EUR') ? `<div class="modal-row"><span class="modal-label">Курс при добавлении</span><span>€${item.rateAtSave.toFixed(item.currency === 'JPY' ? 5 : 4)} за 1 ${item.currency} <span style="color:var(--muted)">(${item.rateAtSaveDate || '—'})</span></span></div><div class="modal-row"><span class="modal-label">Курс сейчас</span><span>€${(state.rates[item.currency] || 1).toFixed(item.currency === 'JPY' ? 5 : 4)} за 1 ${item.currency} ${(() => { const old = item.rateAtSave || 1; const now = state.rates[item.currency] || 1; const diff = ((now - old) / old * 100).toFixed(1); const color = now > old ? 'var(--green)' : 'var(--red)'; const arrow = now > old ? '↑' : '↓'; return now === old ? '<span style="color:var(--muted)">без изменений</span>' : `<span style="color:${color}">${arrow} ${Math.abs(diff)}%</span>`; })()}</span></div>` : ''}
   <div class="modal-row"><span class="modal-label">Статус</span><span class="badge ${badgeClass(item.status)}">${H(item.status || '—')}</span></div>`;
 
-  const imgs = mediaUrlsOf(item);
-  window.currentModalImages = imgs;
-  let imgIdx = 0; const modalImg = document.getElementById('modalImg');
+  const imgs = mediaEntriesOf(item);
+  window.currentModalImages = imgs.map(img => img.url);
+  let imgIdx = 0;
   function updateModalImg() {
-    setModalMedia(imgs[imgIdx] || '', item?.name || '');
-    modalImg.onclick = imgs.length ? () => openLightbox(imgs[imgIdx], item.id) : null;
+    setModalMedia(imgs[imgIdx]?.media || '', item?.name || '');
     document.getElementById('modalImgCounter').textContent = imgs.length > 1 ? `${imgIdx + 1} / ${imgs.length}` : '';
     document.getElementById('modalImgPrev').style.display = imgs.length > 1 ? 'flex' : 'none'; document.getElementById('modalImgNext').style.display = imgs.length > 1 ? 'flex' : 'none';
   }
@@ -1120,13 +1618,13 @@ export function openModal(id) {
 }
 
 export function closeModal() {
+  stopMedia(document.getElementById('modalOverlay'), { resetSrc: true });
   document.getElementById('modalOverlay').style.display = 'none'; appState.modalItemId = null;
   document.getElementById('modalImgPrev').onclick = null; document.getElementById('modalImgNext').onclick = null; document.getElementById('modalImgCounter').textContent = '';
   document.getElementById('modalImgPrev').style.display = 'none'; document.getElementById('modalImgNext').style.display = 'none';
 }
 
 export function renderShelf() {
-  const q = document.getElementById('shelfSearch')?.value.trim().toLowerCase() || '';
   const sort = document.getElementById('shelfSort')?.value || 'newest';
   const received = [];
   getOrders().forEach(o => {
@@ -1141,8 +1639,7 @@ export function renderShelf() {
     });
   });
 
-  let items = [...received];
-  if (q) items = items.filter(i => [i.name, i.manufacturer, i.orderName, ...(i.tags || [])].join(' ').toLowerCase().includes(q));
+  let items = received.filter(i => matchesGlobalSearch(i));
   items.sort((a, b) => {
     if (sort === 'newest') return (b.createdAt || 0) - (a.createdAt || 0);
     if (sort === 'name') return a.name.localeCompare(b.name);
@@ -1200,6 +1697,8 @@ export function openLightbox(src, context = 'gallery') {
   setLightboxMedia(appState.lightboxPhotos[appState.lightboxIndex] || src);
 
   overlay.style.display = 'flex';
+  document.removeEventListener('keydown', lightboxKeyHandler);
+  document.addEventListener('keydown', lightboxKeyHandler);
 
   if (counter) {
     counter.textContent = appState.lightboxPhotos.length > 1
@@ -1209,9 +1708,8 @@ export function openLightbox(src, context = 'gallery') {
 }
 
 export function showLightboxPhoto() {
-  const imgEl = document.getElementById('lightboxImg'); const counterEl = document.getElementById('lightboxCounter');
-  if (!imgEl) return;
-  imgEl.src = appState.lightboxPhotos[appState.lightboxIndex];
+  const counterEl = document.getElementById('lightboxCounter');
+  setLightboxMedia(appState.lightboxPhotos[appState.lightboxIndex]);
   if (appState.lightboxPhotos.length > 1) { if (counterEl) counterEl.textContent = `${appState.lightboxIndex + 1} / ${appState.lightboxPhotos.length}`; } else { if (counterEl) counterEl.textContent = ''; }
 }
 
@@ -1234,8 +1732,13 @@ export function lightboxNav(dir) {
   }
 }
 
-export function lightboxKeyHandler(e) { if (e.key === 'ArrowRight') lightboxNav(1); if (e.key === 'ArrowLeft') lightboxNav(-1); }
-export function closeLightbox() { document.getElementById('lightboxOverlay').style.display = 'none'; document.removeEventListener('keydown', lightboxKeyHandler); }
+export function lightboxKeyHandler(e) { if (e.key === 'ArrowRight') lightboxNav(1); if (e.key === 'ArrowLeft') lightboxNav(-1); if (e.key === 'Escape') closeLightbox(); }
+export function closeLightbox() {
+  const overlay = document.getElementById('lightboxOverlay');
+  stopMedia(overlay, { resetSrc: true });
+  if (overlay) overlay.style.display = 'none';
+  document.removeEventListener('keydown', lightboxKeyHandler);
+}
 export function initLightboxTouch() {
   const overlay = document.getElementById('lightboxOverlay'); if (!overlay || appState.lightboxTouchInitialized) return;
   appState.lightboxTouchInitialized = true;
@@ -1453,6 +1956,12 @@ export function hideStandalonePanes() {
 }
 
 export function switchTab(tab = 'collection') {
+  const previousTab = appState.currentTab;
+  if (previousTab === 'gallery' && tab !== 'gallery') {
+    stopMedia(document.getElementById('galleryPane'), { resetSrc: false });
+  }
+  stopMedia(document.getElementById('modalOverlay'), { resetSrc: true });
+  stopMedia(document.getElementById('lightboxOverlay'), { resetSrc: true });
   appState.currentTab = tab;
   closeFilters();
 
@@ -1509,6 +2018,9 @@ export function goHome() {
 }
 
 export function render() {
+  ensureSearchIndexes();
+  syncGlobalTags();
+  syncGlobalSearchInput();
   applyUiDensity();
   const orders = getOrders();
   const stores = [...new Set(orders.map(o => o.store).filter(Boolean))].sort();
@@ -1523,6 +2035,7 @@ export function render() {
   if (appState.currentTab === 'wishlist') renderWishlist();
   updateWishlistBadge();
   applyI18n();
+  syncMobileCollectionView();
 }
 
 // Background Particles
@@ -1590,14 +2103,3 @@ export function initParticles() {
   resize();
   requestAnimationFrame(draw);
 }
-
-
-
-
-
-
-
-
-
-
-

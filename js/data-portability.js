@@ -1,5 +1,6 @@
 // js/data-portability.js
 import { normalizeStatus } from './status.js';
+import { mergeTags, normalizeProductMeta } from './product-meta.js';
 
 const BACKUP_APP = 'FigureTracker';
 const BACKUP_VERSION = 2;
@@ -52,20 +53,22 @@ function getBackupPayload(rawData) {
 }
 
 function normalizeItem(item) {
-  const next = isPlainObject(item) ? { ...item } : {};
+  const next = normalizeProductMeta(isPlainObject(item) ? item : {});
   const statusKey = normalizeStatus(next.status || next.statusKey);
   if (statusKey) next.statusKey = statusKey;
   return next;
 }
 
 function normalizeWish(wish) {
-  return isPlainObject(wish) ? { ...wish } : {};
+  return normalizeProductMeta(isPlainObject(wish) ? wish : {});
 }
 
 export function exportStateToJson(state) {
   const data = isPlainObject(state) ? clone(state) : {};
   data.items = Array.isArray(data.items) ? data.items : [];
   data.wishlist = Array.isArray(data.wishlist) ? data.wishlist : [];
+  data.items.forEach(item => { if (item && typeof item === 'object') delete item._searchText; });
+  data.wishlist.forEach(wish => { if (wish && typeof wish === 'object') delete wish._searchText; });
   data.settings = isPlainObject(data.settings) ? data.settings : {};
   data.rates = isPlainObject(data.rates) ? data.rates : {};
 
@@ -100,6 +103,12 @@ export function migrateData(rawData, currentState = {}) {
   migrated.rates = isPlainObject(source.rates)
     ? { ...(isPlainObject(current.rates) ? clone(current.rates) : { EUR: 1 }), ...clone(source.rates) }
     : (isPlainObject(current.rates) ? clone(current.rates) : { EUR: 1, USD: 1, JPY: 1 });
+  migrated.settings = isPlainObject(migrated.settings) ? migrated.settings : {};
+  migrated.settings.tags = mergeTags(
+    migrated.settings.tags || migrated.tags || [],
+    migrated.items.flatMap(item => item.tags || []),
+    migrated.wishlist.flatMap(wish => wish.tags || [])
+  );
 
   return migrated;
 }

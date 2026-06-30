@@ -36,16 +36,32 @@ export function bindStaticControls() {
     UI.toggleFilters();
   });
 
+  const globalSearchInput = document.getElementById('globalSearchInput');
+  globalSearchInput?.addEventListener('input', debounce(e => {
+    UI.setGlobalSearch(e.target.value);
+  }, 150));
+  globalSearchInput?.addEventListener('focus', UI.renderGlobalSearchResults);
+  globalSearchInput?.addEventListener('keydown', UI.handleGlobalSearchKeydown);
+
+  document.getElementById('globalSearchResults')?.addEventListener('click', e => {
+    const result = e.target.closest('.global-search-result');
+    if (!result) return;
+    UI.openGlobalSearchResult(result.dataset.resultIndex || 0);
+  });
+
+  document.addEventListener('click', e => {
+    if (e.target.closest('.global-search')) return;
+    UI.hideGlobalSearchResults();
+  });
+
   document.addEventListener('click', (e) => {
     if (window.innerWidth > 768) return;
     if (e.target.closest('#filterToggle') || e.target.closest('#sidebarFilterBody')) return;
     UI.closeFilters();
   });
 
-  document.getElementById('wishSearch')?.addEventListener('input', UI.renderWishlist);
-  document.getElementById('wishPriorityFilter')?.addEventListener('change', UI.renderWishlist);
-  document.getElementById('shelfSearch')?.addEventListener('input', UI.renderShelf);
-  document.getElementById('shelfSort')?.addEventListener('change', UI.renderShelf);
+  document.getElementById('wishPriorityFilter')?.addEventListener('change', () => UI.scheduleRender('wishlist', UI.renderWishlist));
+  document.getElementById('shelfSort')?.addEventListener('change', () => UI.scheduleRender('shelf', UI.renderShelf));
 
   document.getElementById('fOrder')?.addEventListener('input', function () {
     const val = this.value.trim();
@@ -58,19 +74,10 @@ export function bindStaticControls() {
   });
 
   document.getElementById('fTags')?.addEventListener('input', UI.renderTagSuggestions);
-  document.getElementById('sortSelect')?.addEventListener('change', () => { UI.render(); UI.closeFilters(); });
-  document.getElementById('filterStore')?.addEventListener('change', () => { UI.render(); UI.closeFilters(); });
-  document.getElementById('filterRegion')?.addEventListener('change', () => { UI.render(); UI.closeFilters(); });
-
-  document.getElementById('searchInput')?.addEventListener('input', debounce(() => {
-    appState.selectedOrder = null;
-    UI.render();
-    UI.updateSuggestions();
-  }, 120));
-
-  document.getElementById('searchInput')?.addEventListener('blur', () => {
-    setTimeout(() => { document.getElementById('searchSuggestions')?.classList.remove('visible'); }, 150);
-  });
+  document.getElementById('wTags')?.addEventListener('input', UI.renderTagSuggestions);
+  document.getElementById('sortSelect')?.addEventListener('change', () => { UI.scheduleRender('main', UI.render); UI.closeFilters(); });
+  document.getElementById('filterStore')?.addEventListener('change', () => { UI.scheduleRender('main', UI.render); UI.closeFilters(); });
+  document.getElementById('filterRegion')?.addEventListener('change', () => { UI.scheduleRender('main', UI.render); UI.closeFilters(); });
 
   document.getElementById('statusFilters')?.addEventListener('click', e => {
     const chip = e.target.closest('.chip');
@@ -79,18 +86,24 @@ export function bindStaticControls() {
     chip.classList.add('active');
     const val = chip.dataset.filter;
     appState.filterStatus = val === '' ? null : val;
-    UI.render();
+    UI.scheduleRender('main', UI.render);
     UI.closeFilters();
   });
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { UI.closeForm(); UI.closeFilters(); }
+    if (e.key === 'Escape') {
+      UI.closeLightbox();
+      UI.closeModal();
+      UI.closeForm();
+      UI.closeWishForm();
+      UI.closeFilters();
+    }
     if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); UI.clearForm(); UI.openForm(); }
   });
 
-  document.getElementById('gallerySearch')?.addEventListener('input', UI.renderGallery);
-  document.getElementById('gallerySort')?.addEventListener('change', UI.renderGallery);
-  document.getElementById('galleryMaker')?.addEventListener('change', UI.renderGallery);
+  document.getElementById('gallerySort')?.addEventListener('change', () => { UI.resetGalleryPagination(); UI.scheduleRender('gallery', UI.renderGallery); });
+  document.getElementById('galleryMaker')?.addEventListener('change', () => { UI.resetGalleryPagination(); UI.scheduleRender('gallery', UI.renderGallery); });
+  document.getElementById('galleryShowHidden')?.addEventListener('change', e => { UI.resetGalleryPagination(); UI.setGalleryShowHidden(e.target.checked); });
 
   let resizeRaf = 0;
   window.addEventListener('resize', () => {

@@ -105,6 +105,35 @@ async function handleFigureMediaUpload(event) {
   }
 }
 
+//import { refreshAllTelegramMedia } from './media-storage.js';
+
+// async function refreshTelegramOnStartup() {
+//   const token =
+//     state?.settings?.telegramBotToken ||
+//     state?.settings?.tgBotToken ||
+//     state?.settings?.botToken ||
+//     '';
+
+//   if (!token) {
+//     console.warn('[Telegram] token not found, media refresh skipped');
+//     return;
+//   }
+
+//   const result = await refreshAllTelegramMedia(state, token);
+
+//   if (result.refreshed > 0) {
+//     console.log('[Telegram] media refreshed:', result);
+
+//     if (typeof saveState === 'function') {
+//       saveState();
+//     }
+
+//     if (typeof render === 'function') {
+//       render();
+//     }
+//   }
+// }
+
 function bindFigureMediaUpload() {
   const input = document.getElementById('fImgFile');
   if (!input || input.dataset.mediaUploadBound === '1') return;

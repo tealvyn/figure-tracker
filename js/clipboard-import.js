@@ -1,4 +1,6 @@
 // js/clipboard-import.js
+import { formatReleaseDate, mergeTags, parseReleaseDateParts } from './product-meta.js';
+
 const FIGURE_TRACKER_APP = 'FigureTracker';
 
 const MESSAGES = {
@@ -9,36 +11,6 @@ const MESSAGES = {
   success: '\u2705 \u0414\u0430\u043D\u043D\u044B\u0435 \u0442\u043E\u0432\u0430\u0440\u0430 \u0432\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u044B \u0432 \u0444\u043E\u0440\u043C\u0443',
   severalItems: '\u041D\u0430\u0439\u0434\u0435\u043D\u043E \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0442\u043E\u0432\u0430\u0440\u043E\u0432; \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D \u043F\u0435\u0440\u0432\u044B\u0439'
 };
-
-const RU_MONTHS = [
-  '\u042F\u043D\u0432\u0430\u0440\u044C',
-  '\u0424\u0435\u0432\u0440\u0430\u043B\u044C',
-  '\u041C\u0430\u0440\u0442',
-  '\u0410\u043F\u0440\u0435\u043B\u044C',
-  '\u041C\u0430\u0439',
-  '\u0418\u044E\u043D\u044C',
-  '\u0418\u044E\u043B\u044C',
-  '\u0410\u0432\u0433\u0443\u0441\u0442',
-  '\u0421\u0435\u043D\u0442\u044F\u0431\u0440\u044C',
-  '\u041E\u043A\u0442\u044F\u0431\u0440\u044C',
-  '\u041D\u043E\u044F\u0431\u0440\u044C',
-  '\u0414\u0435\u043A\u0430\u0431\u0440\u044C'
-];
-
-const MONTH_ALIASES = [
-  ['jan', 'january', '\u044F\u043D\u0432'],
-  ['feb', 'february', '\u0444\u0435\u0432'],
-  ['mar', 'march', '\u043C\u0430\u0440'],
-  ['apr', 'april', '\u0430\u043F\u0440'],
-  ['may', '\u043C\u0430\u0439', '\u043C\u0430\u044F'],
-  ['jun', 'june', '\u0438\u044E\u043D'],
-  ['jul', 'july', '\u0438\u044E\u043B'],
-  ['aug', 'august', '\u0430\u0432\u0433'],
-  ['sep', 'sept', 'september', '\u0441\u0435\u043D'],
-  ['oct', 'october', '\u043E\u043A\u0442'],
-  ['nov', 'november', '\u043D\u043E\u044F'],
-  ['dec', 'december', '\u0434\u0435\u043A']
-];
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -102,29 +74,6 @@ function parseJson(text) {
   }
 }
 
-function parseReleaseDateParts(releaseDate) {
-  const source = clean(releaseDate);
-  if (!source) return { month: '', year: '' };
-  const lower = source.toLowerCase();
-  const year = lower.match(/(20\d{2}|19\d{2})/)?.[1] || '';
-  let monthIndex = -1;
-
-  const ymd = lower.match(/(?:20\d{2}|19\d{2})[\/\-.\u5e74\s]*(\d{1,2})/);
-  if (ymd) monthIndex = Number(ymd[1]) - 1;
-
-  if (monthIndex < 0) {
-    const mdy = lower.match(/(?:^|[^\d])(\d{1,2})[\/\-.](?:20\d{2}|19\d{2})/);
-    if (mdy) monthIndex = Number(mdy[1]) - 1;
-  }
-
-  if (monthIndex < 0) {
-    monthIndex = MONTH_ALIASES.findIndex(aliases => aliases.some(alias => lower.includes(alias)));
-  }
-
-  if (monthIndex < 0 || monthIndex > 11 || !year) return { month: '', year: '' };
-  return { month: RU_MONTHS[monthIndex], year };
-}
-
 export async function readClipboardJson() {
   if (!navigator.clipboard?.readText) {
     throw new Error(MESSAGES.noClipboardAccess);
@@ -149,8 +98,10 @@ export function normalizeImportedItem(raw, payload = {}) {
   const year = firstValue(item.year, parsed.year);
   const maker = firstValue(item.maker, item.brand, item.manufacturer);
   const brand = firstValue(item.brand, item.maker, item.manufacturer);
-  const imageUrl = firstValue(item.imageUrl, item.img, item.image, item.thumbnail);
-  const sourceUrl = firstValue(item.sourceUrl, item.url, item.pageUrl, payload.pageUrl);
+  const images = Array.isArray(item.images) ? item.images : [];
+  const imageUrl = firstValue(item.imageUrl, item.img, item.image, item.thumbnail, images[0]);
+  const sourceUrl = firstValue(item.sourceUrl);
+  const shopUrl = firstValue(item.shopUrl, item.url, item.pageUrl, payload.pageUrl, sourceUrl);
 
   return {
     name: firstValue(item.name, item.title, item.productName),
@@ -160,15 +111,22 @@ export function normalizeImportedItem(raw, payload = {}) {
     brand,
     month,
     year,
-    releaseDate,
+    releaseDate: formatReleaseDate(releaseDate),
+    preorderStart: firstValue(item.preorderStart, item.preorderFrom),
+    preorderEnd: firstValue(item.preorderEnd, item.preorderUntil),
+    releaseStatus: firstValue(item.releaseStatus, item.status, 'unknown'),
     imageUrl,
+    images,
     img: firstValue(item.img, item.imageUrl, item.image, item.thumbnail),
     sourceUrl,
-    url: firstValue(item.url, item.sourceUrl, item.pageUrl, payload.pageUrl),
+    shopUrl,
+    url: shopUrl,
     store: firstValue(item.store, item.shop, payload.sourceName),
     source: firstValue(item.source, payload.source),
-    jan: firstValue(item.jan, item.janCode),
-    code: firstValue(item.code, item.productCode, item.itemCode)
+    jan: firstValue(item.jan, item.ean, item.janCode),
+    sku: firstValue(item.sku, item.code, item.productCode, item.itemCode),
+    code: firstValue(item.code, item.sku, item.productCode, item.itemCode),
+    tags: mergeTags([], item.tags || [])
   };
 }
 
@@ -187,7 +145,7 @@ export function normalizeClipboardPayload(payload) {
     return items;
   }
 
-  const looksLikeLegacy = ['name', 'price', 'brand', 'maker', 'month', 'year', 'img', 'imageUrl', 'url', 'releaseDate']
+  const looksLikeLegacy = ['name', 'price', 'brand', 'maker', 'month', 'year', 'img', 'imageUrl', 'url', 'releaseDate', 'jan', 'sku', 'code']
     .some(key => clean(payload[key]));
   if (looksLikeLegacy) return [normalizeImportedItem(payload, { ...payload, source: 'legacy', sourceName: 'Tampermonkey' })];
 
@@ -195,29 +153,51 @@ export function normalizeClipboardPayload(payload) {
 }
 
 export function fillMainFormFromImportedItem(item) {
+  const imageList = mergeTags([], [...(Array.isArray(item.images) ? item.images : []), item.imageUrl || item.img]);
+  const currentTags = document.getElementById('fTags')?.value || '';
+  const mergedTags = mergeTags(currentTags, item.tags || []);
   const changed = [
     setValueIfExists('fName', item.name),
     setValueIfExists('fStore', item.store),
     setValueIfExists('fPrice', item.price),
     setValueIfExists('fMaker', item.maker || item.brand),
-    setValueIfExists('fImg', item.imageUrl || item.img),
+    setValueIfExists('fImg', imageList.join(', ')),
     setValueIfExists('fDateMonth', item.month),
     setValueIfExists('fDateYear', item.year),
-    setValueIfExists('fShopUrl', item.sourceUrl || item.url)
+    setValueIfExists('fShopUrl', item.shopUrl || item.url),
+    setValueIfExists('fJan', item.jan),
+    setValueIfExists('fSku', item.sku || item.code),
+    setValueIfExists('fPreorderStart', item.preorderStart),
+    setValueIfExists('fPreorderEnd', item.preorderEnd),
+    setValueIfExists('fReleaseStatus', item.releaseStatus || 'unknown'),
+    setValueIfExists('fSource', item.source),
+    setValueIfExists('fSourceUrl', item.sourceUrl),
+    setValueIfExists('fTags', mergedTags.join(', '))
   ];
   if (document.getElementById('fCurrency')) changed.push(setValueIfExists('fCurrency', item.currency || 'JPY'));
   return changed.some(Boolean);
 }
 
 export function fillWishFormFromImportedItem(item) {
+  const imageList = mergeTags([], [...(Array.isArray(item.images) ? item.images : []), item.imageUrl || item.img]);
+  const currentTags = document.getElementById('wTags')?.value || '';
+  const mergedTags = mergeTags(currentTags, item.tags || []);
   const changed = [
     setValueIfExists('wName', item.name),
     setValueIfExists('wStore', item.store),
     setValueIfExists('wPrice', item.price),
     setValueIfExists('wMaker', item.maker || item.brand),
-    setValueIfExists('wImg', item.imageUrl || item.img),
+    setValueIfExists('wImg', imageList.join(', ')),
     setValueIfExists('wDate', item.releaseDate || [item.month, item.year].filter(Boolean).join(' ')),
-    setValueIfExists('wShopUrl', item.sourceUrl || item.url)
+    setValueIfExists('wShopUrl', item.shopUrl || item.url),
+    setValueIfExists('wJan', item.jan),
+    setValueIfExists('wSku', item.sku || item.code),
+    setValueIfExists('wPreorderStart', item.preorderStart),
+    setValueIfExists('wPreorderEnd', item.preorderEnd),
+    setValueIfExists('wReleaseStatus', item.releaseStatus || 'unknown'),
+    setValueIfExists('wSource', item.source),
+    setValueIfExists('wSourceUrl', item.sourceUrl),
+    setValueIfExists('wTags', mergedTags.join(', '))
   ];
   if (document.getElementById('wCurrency')) changed.push(setValueIfExists('wCurrency', item.currency || 'JPY'));
   return changed.some(Boolean);

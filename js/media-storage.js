@@ -17,6 +17,9 @@ function nowIso() {
 function clean(value) {
   return value == null ? '' : String(value).trim();
 }
+export function isTelegramFileUrl(url = '') {
+  return typeof url === 'string' && url.includes('api.telegram.org/file/bot');
+}
 
 function safeTelegramError(message) {
   return clean(message).replace(/bot\d+:[A-Za-z0-9_-]+/g, 'bot[hidden]');
@@ -356,6 +359,19 @@ export function getMediaUrl(media) {
   if (!media) return '';
   if (typeof media === 'string') return media;
   if (typeof media !== 'object') return '';
+
+  const mediaType = clean(media.mediaType || media.type).toLowerCase();
+  const mimeType = clean(media.mimeType).toLowerCase();
+  const isPlayableMedia =
+    mediaType === 'video' ||
+    mediaType === 'animation' ||
+    mimeType.startsWith('video/') ||
+    mimeType === 'image/gif';
+
+  if (isPlayableMedia) {
+    return clean(media.videoUrl) || clean(media.url) || clean(media.imageUrl) || clean(media.thumbUrl);
+  }
+
   return clean(media.thumbUrl) || clean(media.url) || clean(media.imageUrl) || clean(media.videoUrl);
 }
 
@@ -392,11 +408,14 @@ export function renderMediaTag(media, className = '', alt = '') {
   const kind = getMediaKind(media);
   const safeUrl = String(url).replace(/"/g, '&quot;');
   const safeAlt = String(alt || '').replace(/"/g, '&quot;');
+  const typeAttr = typeof media === 'object' && media?.mimeType
+    ? ` type="${String(media.mimeType).replace(/"/g, '&quot;')}"`
+    : '';
 
   if (kind === 'animation') {
     return `
       <video class="${className}" autoplay loop muted playsinline preload="metadata" onclick="event.stopPropagation()">
-        <source src="${safeUrl}">
+        <source src="${safeUrl}"${typeAttr}>
       </video>
     `;
   }
@@ -404,7 +423,7 @@ export function renderMediaTag(media, className = '', alt = '') {
   if (kind === 'video') {
     return `
       <video class="${className}" controls preload="metadata" playsinline onclick="event.stopPropagation()">
-        <source src="${safeUrl}">
+        <source src="${safeUrl}"${typeAttr}>
       </video>
     `;
   }
@@ -441,3 +460,142 @@ export function detectMediaKind(fileOrUrl, mimeType = '') {
 
   return 'image';
 }
+
+export async function refreshTelegramMediaUrl(media, token) {
+  if (!media || typeof media !== 'object') return '';
+  if (media.provider !== 'telegram') return media.url || '';
+  if (!media.fileId) return media.url || '';
+  if (!token) return media.url || '';
+
+  try {
+    const res = await fetch(
+      `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(media.fileId)}`
+    );
+
+    const data = await res.json();
+
+    if (!data.ok || !data.result?.file_path) {
+      console.warn('[Telegram getFile failed]', media.fileId, data);
+      return media.url || '';
+    }
+
+    const freshUrl = `https://api.telegram.org/file/bot${token}/${data.result.file_path}`;
+
+    media.url = freshUrl;
+    media.src = freshUrl;
+
+    if (media.mediaType === 'video' || String(media.mimeType || '').startsWith('video/')) {
+      media.videoUrl = freshUrl;
+      delete media.imageUrl;
+    } else {
+      media.imageUrl = freshUrl;
+      delete media.videoUrl;
+    }
+
+    media.refreshedAt = new Date().toISOString();
+
+    return freshUrl;
+  } catch (err) {
+    console.warn('[Telegram refresh error]', media.fileId, err);
+    return media.url || '';
+  }
+}
+
+
+export async function refreshAllTelegramMedia(state, settings) {
+  console.warn('[Telegram] refreshAllTelegramMedia disabled to preserve media order');
+  return {
+    refreshed: 0,
+    failed: 0,
+    removedImageUrls: 0,
+    disabled: true
+  };
+}
+// export async function refreshAllTelegramMedia(state, token) {
+//   if (!state || !token) return { refreshed: 0, failed: 0 };
+
+//   const allItems = [
+//     ...(state.items || []),
+//     ...(state.wishlist || [])
+//   ];
+
+//   const cache = new Map();
+//   let refreshed = 0;
+//   let failed = 0;
+
+//   async function getFreshUrl(fileId) {
+//     if (!fileId) return '';
+//     if (cache.has(fileId)) return cache.get(fileId);
+
+//     try {
+//       const res = await fetch(
+//         `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`
+//       );
+
+//       const data = await res.json();
+
+//       if (!data.ok || !data.result?.file_path) {
+//         console.warn('[Telegram getFile failed]', fileId, data);
+//         cache.set(fileId, '');
+//         failed++;
+//         return '';
+//       }
+
+//       const url = `https://api.telegram.org/file/bot${token}/${data.result.file_path}`;
+//       cache.set(fileId, url);
+//       return url;
+//     } catch (err) {
+//       console.warn('[Telegram getFile error]', fileId, err);
+//       cache.set(fileId, '');
+//       failed++;
+//       return '';
+//     }
+//   }
+
+//   for (const item of allItems) {
+//     const mediaList = Array.isArray(item.media) ? item.media : [];
+
+//     for (const media of mediaList) {
+//       if (!media || typeof media !== 'object') continue;
+//       if (media.provider !== 'telegram') continue;
+//       if (!media.fileId) continue;
+
+//       const freshUrl = await getFreshUrl(media.fileId);
+//       if (!freshUrl) continue;
+
+//       if (media.url !== freshUrl) {
+//         refreshed++;
+//       }
+
+//       media.url = freshUrl;
+//       media.src = freshUrl;
+
+//       if (media.mediaType === 'video' || String(media.mimeType || '').startsWith('video/')) {
+//         media.videoUrl = freshUrl;
+//         delete media.imageUrl;
+//       } else {
+//         media.imageUrl = freshUrl;
+//         delete media.videoUrl;
+//       }
+
+//       media.refreshedAt = new Date().toISOString();
+//     }
+
+//     // ВАЖНО: Telegram-ссылки больше не держим в imageUrls.
+//     if (Array.isArray(item.imageUrls)) {
+//       item.imageUrls = item.imageUrls.filter(url =>
+//         typeof url === 'string' &&
+//         !url.includes('api.telegram.org/file/bot')
+//       );
+//     }
+
+//     // Обложка: обычная внешняя картинка, если есть; иначе первое media.
+//     const cover = item.imageUrls?.[0] || item.media?.[0]?.url || '';
+//     if (cover) {
+//       item.imageUrl = cover;
+//       item.img = cover;
+//     }
+//   }
+
+//   return { refreshed, failed };
+// }

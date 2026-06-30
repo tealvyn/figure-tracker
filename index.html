@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-title" content="Figure Tracker">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=global-search-header-20260630">
 </head>
 
 <body>
@@ -24,6 +24,11 @@
     <header class="topbar">
       <div class="topbar-logo" onclick="goHome()" style="cursor:pointer;" title="На главную" data-i18n-title="top.home">
         Figure<span>.</span>Tracker</div>
+      <div class="global-search">
+        <input id="globalSearchInput" class="global-search-input" type="search" placeholder="Поиск по всему трекеру..." autocomplete="off" />
+        <div id="globalSearchCounts" class="global-search-counts"></div>
+        <div id="globalSearchResults" class="global-search-results" hidden></div>
+      </div>
       <div class="topbar-right">
         <div class="lang-switch" aria-label="Language">
           <button class="lang-option" type="button" data-lang-option="ru">RU</button>
@@ -380,25 +385,24 @@
   <!-- ЛАЙТБОКС (ГАЛЕРЕЯ НА ВЕСЬ ЭКРАН) -->
   <div class="lightbox-overlay" id="lightboxOverlay" style="display:none;" onclick="closeLightbox()">
     <!-- Стрелка влево -->
-    <button class="lightbox-arrow left" onclick="event.stopPropagation();lightboxNav(-1)">‹</button>
+    <button class="icon-action-btn lightbox-arrow left" onclick="event.stopPropagation();lightboxNav(-1)">‹</button>
 
     <!-- Картинка -->
-    <img id="lightboxImg" src="" alt="" onclick="event.stopPropagation()">
+    <img id="lightboxImg" alt="" onclick="event.stopPropagation()">
 
     <!-- Стрелка вправо -->
-    <button class="lightbox-arrow right" onclick="event.stopPropagation();lightboxNav(1)">›</button>
+    <button class="icon-action-btn lightbox-arrow right" onclick="event.stopPropagation();lightboxNav(1)">›</button>
 
     <!-- Счётчик -->
     <div id="lightboxCounter" class="lightbox-counter"></div>
 
     <!-- Закрыть -->
-    <button class="lightbox-close" onclick="event.stopPropagation();closeLightbox()">✕</button>
+    <button class="icon-action-btn muted lightbox-close" onclick="event.stopPropagation();closeLightbox()">✕</button>
   </div>
-  <div class="form-overlay" id="formOverlay" style="display:none">
+  <div class="form-overlay" id="formOverlay" style="display:none" onclick="if(event.target===this)closeForm()">
     <div class="form-panel">
       <div class="form-title">
         <span id="formTitle" data-i18n="form.addFigure">Добавить фигурку</span>
-        <button class="btn btn-icon" onclick="closeForm()">✕</button>
       </div>
       <div class="form-grid">
         <div class="form-group full">
@@ -458,7 +462,7 @@
         </div>
         <div class="form-group">
           <div class="form-label" data-i18n="form.releaseDate">Дата выхода</div>
-          <div style="display:flex;gap:8px;">
+          <div class="release-date-row" style="display:flex;gap:8px;">
             <select id="fDateMonth"
               style="flex:1;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;">
               <option value="" data-i18n="form.monthPlaceholder">— месяц —</option>
@@ -479,9 +483,48 @@
               style="width:90px;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;" />
           </div>
         </div>
+         <details class="product-meta-fields product-meta-details full">
+          <summary>Данные товара</summary>
+          <div class="product-meta-grid">
+            <div class="form-group">
+              <div class="form-label">JAN / EAN</div>
+              <input id="fJan" placeholder="4580590..." />
+            </div>
+            <div class="form-group">
+              <div class="form-label">SKU / код товара</div>
+              <input id="fSku" placeholder="FIGURE-123456" />
+            </div>
+            <div class="form-group">
+              <div class="form-label">Дата начала предзаказа</div>
+              <input id="fPreorderStart" placeholder="2026-10-01" />
+            </div>
+            <div class="form-group">
+              <div class="form-label">Дата окончания предзаказа</div>
+              <input id="fPreorderEnd" placeholder="2026-11-15" />
+            </div>
+            <div class="form-group">
+              <div class="form-label">Статус релиза</div>
+              <select id="fReleaseStatus">
+                <option value="unknown">unknown</option>
+                <option value="preorder">preorder</option>
+                <option value="released">released</option>
+                <option value="delayed">delayed</option>
+                <option value="cancelled">cancelled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Источник импорта</div>
+              <input id="fSource" placeholder="AmiAmi / GoodSmile / OrzGK" />
+            </div>
+            <div class="form-group full">
+              <div class="form-label">Ссылка-источник</div>
+              <input id="fSourceUrl" placeholder="https://..." type="url" />
+            </div>
+          </div>
+        </details>
         <div class="form-group full">
           <div class="form-label" data-i18n="form.image">Ссылка на картинку / Загрузить на Диск</div>
-          <div style="display:flex; gap:8px;">
+          <div class="input-with-button upload-input-group" style="display:flex; gap:8px;">
             <input id="fImg" placeholder="https://..." style="flex:1;" />
             <button type="button" class="btn btn-sm" onclick="document.getElementById('fImgFile').click()">📤
               Загрузить</button>
@@ -490,7 +533,7 @@
         </div>
         <div class="form-group full">
           <div class="form-label" data-i18n="form.productUrl">Ссылка на страницу товара</div>
-          <div style="display:flex; gap:8px;">
+          <div class="input-with-button fill-input-group" style="display:flex; gap:8px;">
             <input id="fShopUrl" placeholder="https://www.amiami.com/..." type="url" style="flex:1;" />
             <button type="button" class="btn btn-sm" id="btnAutofillMain" onclick="grabFromTampermonkey('main')">🔍
               Заполнить</button>
@@ -498,7 +541,7 @@
         </div>
         <div class="form-group full">
           <div class="form-label" data-i18n="form.price">Цена товара</div>
-          <div class="price-row">
+          <div class="price-row price-currency-row">
             <div class="form-group">
               <input id="fPrice" type="number" step="0.01" placeholder="11430" oninput="updateEurPreview()" />
             </div>
@@ -514,7 +557,7 @@
         </div>
         <div class="form-group">
           <div class="form-label" data-i18n="form.shipping">Доставка EUR (весь заказ)</div>
-          <div style="display:flex;gap:8px;align-items:center;">
+          <div class="shipping-row" style="display:flex;gap:8px;align-items:center;">
             <input id="fShipping" type="number" step="0.01" placeholder="авто" data-i18n-placeholder="form.shippingHint"
               style="flex:2;min-width:0;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;" />
             <select id="fShipMethod"
@@ -550,37 +593,27 @@
         </select>
       </div>
     </div>
-    <div class="ert">
-
-      <!-- Сохранить -->
-      <button class="modal-action-btn" data-tip="Сохранить" onclick="saveItem()"
-        style="border-color:var(--green);color:var(--green);">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
-      </button>
-
-      <!-- Отмена / закрыть -->
-      <button class="modal-action-btn danger" data-tip="Отмена" onclick="closeForm()">
+    <div class="form-actions form-icon-actions icon-action-group vertical">
+       <button class="icon-action-btn danger" type="button" onclick="closeForm()" title="Отмена" data-tip="Отмена">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
-
-
+      <button class="icon-action-btn success" type="button" onclick="saveItem()" title="Сохранить" data-tip="Сохранить">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </button>
     </div>
-  </div>
   </div>
   <div class="modal-overlay" id="modalOverlay" style="display:none" onclick="if(event.target===this)closeModal()">
     <div class="modal-wrap">
       <div class="modal-box">
         <div style="position:relative;display:inline-flex;align-items:center;justify-content:center;max-width:100%;">
-          <button id="modalImgPrev"
-            style="display:none;position:absolute;left:8px;background:rgba(0,0,0,.6);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;align-items:center;justify-content:center;z-index:2;">‹</button>
+          <button id="modalImgPrev" class="icon-action-btn modal-image-nav prev" style="display:none;">‹</button>
           <img class="modal-img" id="modalImg" src="" alt="" />
-          <button id="modalImgNext"
-            style="display:none;position:absolute;right:8px;background:rgba(0,0,0,.6);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;align-items:center;justify-content:center;z-index:2;">›</button>
+          <button id="modalImgNext" class="icon-action-btn modal-image-nav next" style="display:none;">›</button>
           <span id="modalImgCounter"
             style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;color:#fff;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:20px;"></span>
         </div>
@@ -589,31 +622,31 @@
           <div id="modalRows"></div>
         </div>
       </div>
-      <div class="modal-actions">
-        <button class="modal-action-btn" id="modalClose" onclick="closeModal()" data-tip="Закрыть">
+      <div class="modal-actions icon-action-group vertical">
+        <button class="icon-action-btn muted modal-action-btn" id="modalClose" onclick="closeModal()" data-tip="Закрыть">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
-        <button class="modal-action-btn" id="modalMove" data-tip="Заказал! → в коллекцию" style="display:none">
+        <button class="icon-action-btn success modal-action-btn" id="modalMove" data-tip="Заказал! → в коллекцию" style="display:none">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M5 12h14M12 5l7 7-7 7" />
           </svg>
         </button>
-        <button id="modalReceive" class="modal-action-btn" data-tip="Получено!" style="display:none;">
+        <button id="modalReceive" class="icon-action-btn success modal-action-btn" data-tip="Получено!" style="display:none;">
           <!-- галочка -->
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </button>
-        <button class="modal-action-btn" id="modalEdit" data-tip="Редактировать">
+        <button class="icon-action-btn modal-action-btn" id="modalEdit" data-tip="Редактировать">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
           </svg>
         </button>
-        <button class="modal-action-btn danger" id="modalDelete" data-tip="Удалить">
+        <button class="icon-action-btn danger modal-action-btn" id="modalDelete" data-tip="Удалить">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -624,11 +657,10 @@
       </div>
     </div>
   </div>
-  <div class="form-overlay" id="wishFormOverlay" style="display:none">
+  <div class="form-overlay" id="wishFormOverlay" style="display:none" onclick="if(event.target===this)closeWishForm()">
     <div class="form-panel">
       <div class="form-title">
         <span id="wishFormTitle" data-i18n="wish.formTitle">Добавить в вишлист</span>
-        <button class="btn btn-icon" onclick="closeWishForm()">✕</button>
       </div>
       <div class="form-grid">
         <div class="form-group full">
@@ -653,6 +685,45 @@
         <div class="form-group">
           <div class="form-label" data-i18n="form.releaseDate">Дата выхода</div><input id="wDate" placeholder="2027" />
         </div>
+        <details class="product-meta-fields full">
+          <summary>Данные товара</summary>
+          <div class="product-meta-grid">
+            <div class="form-group">
+              <div class="form-label">JAN / EAN</div>
+              <input id="wJan" placeholder="4580590..." />
+            </div>
+            <div class="form-group">
+              <div class="form-label">SKU / код товара</div>
+              <input id="wSku" placeholder="FIGURE-123456" />
+            </div>
+            <div class="form-group">
+              <div class="form-label">Дата начала предзаказа</div>
+              <input id="wPreorderStart" placeholder="2026-10-01" />
+            </div>
+            <div class="form-group">
+              <div class="form-label">Дата окончания предзаказа</div>
+              <input id="wPreorderEnd" placeholder="2026-11-15" />
+            </div>
+            <div class="form-group">
+              <div class="form-label">Статус релиза</div>
+              <select id="wReleaseStatus">
+                <option value="unknown">unknown</option>
+                <option value="preorder">preorder</option>
+                <option value="released">released</option>
+                <option value="delayed">delayed</option>
+                <option value="cancelled">cancelled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <div class="form-label">Источник импорта</div>
+              <input id="wSource" placeholder="AmiAmi / GoodSmile / OrzGK" />
+            </div>
+            <div class="form-group full">
+              <div class="form-label">Ссылка-источник</div>
+              <input id="wSourceUrl" placeholder="https://..." type="url" />
+            </div>
+          </div>
+        </details>
         <div class="form-group full">
           <div class="form-label" data-i18n="wish.image">Ссылка на картинку</div><textarea id="wImg"
             placeholder="https://img.amiami.com/1.jpg, https://img.amiami.com/2.jpg"
@@ -678,22 +749,31 @@
             <option value="low" data-i18n="wish.priorityLowFull">💭 Низкий — если найду дёшево</option>
           </select>
         </div>
+        <div class="form-group full">
+          <div class="form-label">Теги / серии (через запятую)</div>
+          <input id="wTags" placeholder="Hololive, Nendo, Prize..." />
+          <div id="wishTagSuggestions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+        </div>
       </div>
-      <div class="form-actions">
-        <button class="btn btn-primary" onclick="saveWish()" data-i18n="common.save">Сохранить</button>
-        <button class="btn" onclick="closeWishForm()" data-i18n="common.cancel">Отмена</button>
-      </div>
+    </div>
+    <div class="form-actions form-icon-actions wish-icon-actions icon-action-group vertical">
+      <button class="icon-action-btn danger" type="button" onclick="closeWishForm()" title="Отмена" data-tip="Отмена">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+      <button class="icon-action-btn success" type="button" onclick="saveWish()" title="Сохранить" data-tip="Сохранить">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </button>
     </div>
 
 
   </div>
-  <script type="module" src="js/main.js"></script>
+  <script type="module" src="js/main.js?v=video-media-fix-20260629"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 
 </html>
-
-
-
-
-
