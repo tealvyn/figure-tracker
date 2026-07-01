@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.applyUiDensity();
   bindStaticControls();
   bindFigureMediaUpload();
+  bindWishMediaUpload();
   bindImportFileInput(document.getElementById('importFile'), {
     state,
     appState,
@@ -36,12 +37,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   initLanguageControls();
   UI.bindItemDraftAutosave();
-  API.fetchRates();
   UI.render();
   UI.initPreviewVideoControlsObserver();
   UI.checkReleaseReminders();
   UI.initParticles();
-updateBanner(true);
+  updateBanner(true);
+  requestAnimationFrame(() => {
+    API.fetchRates?.().catch(error => console.warn('[startup fetchRates]', error));
+  });
   setInterval(() => {
     UI.checkReleaseReminders();
     UI.updateBanner(true);
@@ -106,6 +109,56 @@ async function handleFigureMediaUpload(event) {
   }
 }
 
+async function handleWishMediaUpload(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+
+  const imgInput = document.getElementById('wImg');
+  if (!imgInput) {
+    event.target.value = '';
+    return;
+  }
+
+  const originalValue = imgInput.value;
+  const originalPlaceholder = imgInput.placeholder;
+  let currentValue = originalValue;
+  let uploadedCount = 0;
+
+  try {
+    imgInput.value = state.settings?.tgBotToken && state.settings?.tgChatId
+      ? 'Uploading wishlist media to Telegram...'
+      : 'Uploading wishlist media...';
+    imgInput.disabled = true;
+
+    const mediaList = await uploadMediaBatch(files, state.settings, {
+      onProgress(message) {
+        imgInput.value = message;
+      },
+      onFileUploaded(media, index, total) {
+        const finalUrl = getImageUrl(media);
+        currentValue = appendImageUrl(currentValue, finalUrl);
+        imgInput.value = currentValue;
+        appState.pendingWishUploadedMedia = appState.pendingWishUploadedMedia || [];
+        appState.pendingWishUploadedMedia.push(media);
+        uploadedCount = index + 1;
+        UI.toast(`${uploadedCount}/${total}: wishlist media added`);
+      }
+    });
+
+    imgInput.value = currentValue;
+    imgInput.dispatchEvent(new Event('input', { bubbles: true }));
+    imgInput.dispatchEvent(new Event('change', { bubbles: true }));
+    UI.toast(mediaList.length > 1 ? 'Wishlist media added' : 'Wishlist media added');
+  } catch (error) {
+    imgInput.value = uploadedCount > 0 ? currentValue : originalValue;
+    alert('Wishlist media upload failed: ' + (error?.message || 'upload failed'));
+  } finally {
+    imgInput.placeholder = originalPlaceholder;
+    imgInput.disabled = false;
+    event.target.value = '';
+  }
+}
+
 //import { refreshAllTelegramMedia } from './media-storage.js';
 
 // async function refreshTelegramOnStartup() {
@@ -141,6 +194,14 @@ function bindFigureMediaUpload() {
   input.dataset.mediaUploadBound = '1';
   input.multiple = true;
   input.addEventListener('change', handleFigureMediaUpload);
+}
+
+function bindWishMediaUpload() {
+  const input = document.getElementById('wImgFile');
+  if (!input || input.dataset.mediaUploadBound === '1') return;
+  input.dataset.mediaUploadBound = '1';
+  input.multiple = true;
+  input.addEventListener('change', handleWishMediaUpload);
 }
 
 if ('serviceWorker' in navigator) {

@@ -18,10 +18,15 @@ function mediaTag(url, className = 'figure-img', alt = '') {
   const safeAlt = H(alt);
 
   if (isVideoUrl(url)) {
+    const videoId = `app-video-${crypto.randomUUID()}`;
     return `
-      <video class="${className}" controls preload="metadata" playsinline onclick="event.stopPropagation()">
-        <source src="${safeUrl}">
-      </video>
+      <div class="app-video-wrap" data-no-card-open="true" data-no-swipe="true" data-no-lightbox-close="true">
+        <video id="${videoId}" class="app-video ${className}" src="${safeUrl}" preload="metadata" playsinline data-app-video="true" data-no-card-open="true" data-no-swipe="true" data-no-lightbox-close="true"></video>
+        <div class="app-video-controls" data-no-card-open="true" data-no-swipe="true" data-no-lightbox-close="true">
+          <button class="app-video-play" type="button" onclick="toggleAppVideoPlay(event, '${videoId}')">▶</button>
+          <button class="app-video-mute" type="button" onclick="toggleAppVideoMute(event, '${videoId}')">🔇</button>
+        </div>
+      </div>
     `;
   }
 

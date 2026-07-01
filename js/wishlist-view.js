@@ -3,16 +3,10 @@ import { state, appState, persist, toEur } from './state.js';
 import { H, eur } from './utils.js';
 import { toast } from './notifications.js';
 import { applyI18n, t } from './i18n.js';
-import { buildSearchText, formatReleaseDate, mergeTags, normalizeProductMeta, renderProductMetaBadges, renderProductMetaRows } from './product-meta.js';
-import { getMediaKind, getMediaUrl, isTelegramFileUrl } from './media-storage.js';
+import { buildSearchText, formatReleaseDate, mergeTags, normalizeProductMeta, renderProductMetaBadges } from './product-meta.js';
+import { getMediaKind, getMediaUrl, isTelegramFileUrl, isVideoUrl } from './media-storage.js';
 
 const PRIORITY_COLOR = { high: 'var(--red)', mid: 'var(--yellow)', low: 'var(--muted)' };
-let lastWishDetailNavAt = 0;
-
-function shouldIgnoreDuplicateNav(lastAt, gap = 140) {
-  const now = performance.now();
-  return Boolean(lastAt) && now - lastAt < gap;
-}
 
 function priorityLabel(priority) {
   const labels = {
@@ -25,6 +19,35 @@ function priorityLabel(priority) {
 
 function shouldUseExternalUrl(url) {
   return Boolean(url) && !isTelegramFileUrl(String(url));
+}
+
+function isExternalVideoUrl(url) {
+  return shouldUseExternalUrl(url) && (isVideoUrl(url) || /video/i.test(String(url)));
+}
+
+function isExternalImageUrl(url) {
+  return shouldUseExternalUrl(url) && !isExternalVideoUrl(url);
+}
+
+function guessVideoMimeType(url) {
+  if (/\.webm(\?|#|$)/i.test(url)) return 'video/webm';
+  if (/\.mov(\?|#|$)/i.test(url)) return 'video/quicktime';
+  if (/\.m4v(\?|#|$)/i.test(url)) return 'video/mp4';
+  return 'video/mp4';
+}
+
+function createExternalVideoMedia(url) {
+  const cleanUrl = String(url || '').trim();
+  return {
+    id: crypto.randomUUID(),
+    provider: 'external',
+    type: 'video',
+    mediaType: 'video',
+    mimeType: guessVideoMimeType(cleanUrl),
+    url: cleanUrl,
+    videoUrl: cleanUrl,
+    createdAt: Date.now()
+  };
 }
 
 function mediaKey(value) {
@@ -41,6 +64,52 @@ function mediaKey(value) {
     ).trim();
   }
   return String(value || '').trim();
+}
+
+function mergeMediaByUrl(...lists) {
+  const map = new Map();
+  for (const list of lists) {
+    for (const media of list || []) {
+      const key = mediaKey(media);
+      if (key && !map.has(key)) map.set(key, media);
+    }
+  }
+  return [...map.values()];
+}
+
+function mediaUrlSet(mediaList = []) {
+  const urls = new Set();
+  for (const media of mediaList || []) {
+    if (!media) continue;
+    if (typeof media === 'object') {
+      [media.url, media.src, media.imageUrl, media.videoUrl, getMediaUrl(media)]
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+        .forEach(url => urls.add(url));
+    } else {
+      const url = String(media || '').trim();
+      if (url) urls.add(url);
+    }
+  }
+  return urls;
+}
+
+function wishFormUrls(wish) {
+  const urls = [];
+  const seen = new Set();
+  const add = url => {
+    const value = String(url || '').trim();
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    urls.push(value);
+  };
+  (wish?.imageUrls || []).forEach(add);
+  (wish?.media || []).forEach(media => {
+    const url = getMediaUrl(media);
+    if (media?.provider === 'external' && isExternalVideoUrl(url)) add(url);
+  });
+  if (!urls.length && shouldUseExternalUrl(wish?.imageUrl)) add(wish.imageUrl);
+  return urls;
 }
 
 function wishlistMediaEntries(wish) {
@@ -61,48 +130,6 @@ function wishlistMediaEntries(wish) {
   if (shouldUseExternalUrl(wish?.img)) add(wish.img);
 
   return entries;
-}
-
-function setWishModalMedia(target, entry, alt = '', lightboxContext = null) {
-  if (!target) return null;
-  const media = entry?.media || '';
-  const url = getMediaUrl(media);
-  const kind = getMediaKind(media);
-  const next = document.createElement(kind === 'video' || kind === 'animation' ? 'video' : 'img');
-  next.id = target.id;
-  next.className = 'modal-img ' + (url && kind === 'image' ? 'zoomable' : '');
-  next.style.display = url ? 'block' : 'none';
-
-  if (media && typeof media === 'object') {
-    if (media.provider) next.dataset.provider = media.provider;
-    if (media.fileId) next.dataset.fileId = media.fileId;
-    if (media.mediaType) next.dataset.mediaType = media.mediaType;
-  }
-
-  if (next.tagName === 'VIDEO') {
-    next.controls = kind === 'video';
-    next.autoplay = kind === 'animation';
-    next.loop = kind === 'animation';
-    next.muted = kind === 'animation';
-    next.playsInline = true;
-    next.preload = 'metadata';
-    next.src = url;
-    next.dataset.noCardOpen = 'true';
-    next.onclick = event => window.stopMediaEvent?.(event) || event.stopPropagation();
-    next.onpointerdown = event => window.stopMediaEvent?.(event) || event.stopPropagation();
-    next.ontouchstart = event => window.stopMediaEvent?.(event) || event.stopPropagation();
-  } else {
-    next.src = url;
-    next.alt = alt || '';
-    next.onclick = url ? event => {
-      event.stopPropagation();
-      window.openLightbox?.(media, lightboxContext || { items: [entry], index: 0, ownerType: 'wishlist' });
-    } : null;
-  }
-
-  next.onerror = () => window.handleMediaLoadError?.(next);
-  target.replaceWith(next);
-  return next;
 }
 
 function syncWishlistGlobalTags() {
@@ -132,6 +159,8 @@ export function updateWishlistBadge() {
 
 export function openWishForm() {
   appState.editingWishId = null;
+  appState.pendingWishUploadedMedia = [];
+  appState.pendingUploadedWishMedia = [];
   clearWishForm();
   document.getElementById('wishFormOverlay').style.display = 'flex';
   window.renderTagSuggestions?.();
@@ -142,6 +171,8 @@ export function closeWishForm() {
   window.stopMedia?.(document.getElementById('wishFormOverlay'), { resetSrc: false });
   document.getElementById('wishFormOverlay').style.display = 'none';
   appState.editingWishId = null;
+  appState.pendingWishUploadedMedia = [];
+  appState.pendingUploadedWishMedia = [];
 }
 
 export function clearWishForm() {
@@ -159,7 +190,30 @@ export function clearWishForm() {
 export function saveWish() {
   const name = document.getElementById('wName').value.trim();
   if (!name) { alert(t('alert.wishNameRequired')); return; }
-  const imageUrls = document.getElementById('wImg').value.split(',').map(s => s.trim()).filter(shouldUseExternalUrl);
+  const rawUrls = (document.getElementById('wImg')?.value || '')
+    .split(/[\n,]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  const existingWish = appState.editingWishId
+    ? (state.wishlist || []).find(w => w.id === appState.editingWishId)
+    : null;
+  const baseMedia = mergeMediaByUrl(
+    existingWish?.media || [],
+    existingWish?.images || [],
+    appState.pendingWishUploadedMedia || [],
+    appState.pendingUploadedWishMedia || []
+  );
+  const baseMediaUrls = mediaUrlSet(baseMedia);
+  const externalVideoMedia = rawUrls
+    .filter(isExternalVideoUrl)
+    .filter(url => !baseMediaUrls.has(url))
+    .map(createExternalVideoMedia);
+  const media = mergeMediaByUrl(baseMedia, externalVideoMedia);
+  const mediaUrls = mediaUrlSet(media);
+  const imageUrls = rawUrls
+    .filter(isExternalImageUrl)
+    .filter(url => !mediaUrls.has(url));
+  const fallbackMediaUrl = getMediaUrl(media[0]) || '';
   const wish = normalizeProductMeta({
     id: appState.editingWishId || crypto.randomUUID(),
     name,
@@ -169,7 +223,9 @@ export function saveWish() {
     currency: document.getElementById('wCurrency').value,
     releaseDate: formatReleaseDate(document.getElementById('wDate').value.trim()),
     imageUrls,
-    imageUrl: imageUrls[0] || '',
+    imageUrl: imageUrls[0] || existingWish?.imageUrl || fallbackMediaUrl || '',
+    img: imageUrls[0] || existingWish?.img || fallbackMediaUrl || '',
+    media,
     shopUrl: document.getElementById('wShopUrl').value.trim(),
     jan: document.getElementById('wJan')?.value.trim() || '',
     sku: document.getElementById('wSku')?.value.trim() || '',
@@ -215,13 +271,15 @@ export function editWish(id) {
   if (!rawWish) return;
   const w = normalizeProductMeta(rawWish);
   appState.editingWishId = id;
+  appState.pendingWishUploadedMedia = [];
+  appState.pendingUploadedWishMedia = [];
   document.getElementById('wName').value = w.name || '';
   document.getElementById('wStore').value = w.store || '';
   document.getElementById('wMaker').value = w.manufacturer || '';
   document.getElementById('wPrice').value = w.priceOriginal || '';
   document.getElementById('wCurrency').value = w.currency || 'JPY';
   document.getElementById('wDate').value = w.releaseDate || '';
-  document.getElementById('wImg').value = (w.imageUrls || [w.imageUrl || '']).filter(Boolean).join(', ');
+  document.getElementById('wImg').value = wishFormUrls(w).join(', ');
   document.getElementById('wShopUrl').value = w.shopUrl || '';
   document.getElementById('wNotes').value = w.notes || '';
   document.getElementById('wPriority').value = w.priority || 'mid';
@@ -273,7 +331,7 @@ export function renderWishlist() {
     const coverUrl = coverEntry?.url || wish.imageUrl || '';
     const coverMedia = coverEntry?.media || coverUrl;
     const priceEur = toEur(wish.priceOriginal || 0, wish.currency || 'EUR');
-    return `<div class="wish-card animate-in" style="animation-delay:${wishes.indexOf(w) * 40}ms" onclick="if(window.isCardOpenBlocked?.(event))return;openWishModal('${H(wish.id)}')">
+    return `<div class="wish-card animate-in" style="animation-delay:${wishes.indexOf(w) * 40}ms" onclick="if(window.isCardOpenBlocked?.(event))return;openEntityDetail('wishlist','${H(wish.id)}')">
       ${coverUrl ? `<img class="wish-img" src="${H(coverUrl)}" loading="lazy" alt="${H(wish.name)}" data-provider="${H(coverMedia?.provider || '')}" data-file-id="${H(coverMedia?.fileId || '')}" data-media-type="${H(coverMedia?.mediaType || '')}" onerror="handleMediaLoadError(this)">` : `<div class="wish-img" style="display:flex;align-items:center;justify-content:center;font-size:48px;">⭐</div>`}
       <div class="wish-body">
         <div class="wish-name">${H(wish.name)}</div>
@@ -290,60 +348,5 @@ export function renderWishlist() {
 }
 
 export function openWishModal(id) {
-  window.pauseAllVideosExcept?.();
-  const rawWish = (state.wishlist || []).find(x => x.id === id);
-  if (!rawWish) return;
-  const w = normalizeProductMeta(rawWish);
-  const priceEur = toEur(w.priceOriginal || 0, w.currency || 'EUR');
-  const imgs = wishlistMediaEntries(w);
-  appState.productDetailMedia = imgs;
-  appState.productDetailMediaIndex = 0;
-  let modalImg = document.getElementById('modalImg');
-
-  function updateWishModalImg() {
-    const entries = appState.productDetailMedia || imgs;
-    const imgIdx = Math.max(0, Math.min(entries.length - 1, Number(appState.productDetailMediaIndex) || 0));
-    appState.productDetailMediaIndex = imgIdx;
-    window.stopMedia?.(document.getElementById('modalOverlay'), { resetSrc: true });
-    modalImg = setWishModalMedia(modalImg, entries[imgIdx], w.name, {
-      items: entries,
-      index: imgIdx,
-      ownerId: id,
-      ownerType: 'wishlist'
-    });
-    document.getElementById('modalImgCounter').textContent = entries.length > 1 ? `${imgIdx + 1} / ${entries.length}` : '';
-    document.getElementById('modalImgPrev').style.display = entries.length > 1 ? 'flex' : 'none';
-    document.getElementById('modalImgNext').style.display = entries.length > 1 ? 'flex' : 'none';
-  }
-
-  document.getElementById('modalImgPrev').onclick = () => {
-    if (shouldIgnoreDuplicateNav(lastWishDetailNavAt)) return;
-    lastWishDetailNavAt = performance.now();
-    const entries = appState.productDetailMedia || [];
-    if (entries.length <= 1) return;
-    appState.productDetailMediaIndex = (Number(appState.productDetailMediaIndex || 0) - 1 + entries.length) % entries.length;
-    updateWishModalImg();
-  };
-  document.getElementById('modalImgNext').onclick = () => {
-    if (shouldIgnoreDuplicateNav(lastWishDetailNavAt)) return;
-    lastWishDetailNavAt = performance.now();
-    const entries = appState.productDetailMedia || [];
-    if (entries.length <= 1) return;
-    appState.productDetailMediaIndex = (Number(appState.productDetailMediaIndex || 0) + 1) % entries.length;
-    updateWishModalImg();
-  };
-  updateWishModalImg();
-  document.getElementById('modalOverlay')?.classList.add('product-detail-overlay', 'wishlist-detail-overlay');
-  document.querySelector('#modalOverlay .modal-box')?.classList.add('product-detail-modal', 'wishlist-detail-modal');
-  document.querySelector('#modalOverlay .modal-body')?.classList.add('product-detail-info', 'wishlist-detail-info');
-  document.getElementById('modalImg')?.parentElement?.classList.add('product-detail-media', 'wishlist-detail-media');
-  document.getElementById('modalName')?.classList.add('product-detail-title');
-  document.getElementById('modalRows')?.classList.add('product-detail-meta-grid');
-  document.getElementById('modalName').textContent = w.name || '—';
-  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">${t('modal.priority')}</span><span style="color:${PRIORITY_COLOR[w.priority]}">${priorityLabel(w.priority)}</span></div>${w.store ? `<div class="modal-row"><span class="modal-label">${t('modal.store')}</span><span>${H(w.store)}</span></div>` : ''}${w.manufacturer ? `<div class="modal-row"><span class="modal-label">${t('modal.manufacturer')}</span><span>${H(w.manufacturer)}</span></div>` : ''}${w.priceOriginal ? `<div class="modal-row"><span class="modal-label">${t('modal.price')}</span><span>${w.priceOriginal} ${w.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div>` : ''}${renderProductMetaRows(w)}${w.tags?.length ? `<div class="modal-row"><span class="modal-label">${t('modal.tags')}</span><span class="tags">${w.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${w.notes ? `<div class="modal-row"><span class="modal-label">${t('modal.notes')}</span><span>${H(w.notes)}</span></div>` : ''}${w.shopUrl ? `<div class="modal-row"><span class="modal-label">${t('modal.productPage')}</span><a href="${H(w.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">${t('common.openStore')}</a></div>` : ''}`;
-  document.getElementById('modalMove').style.display = 'flex';
-  document.getElementById('modalMove').onclick = () => window.moveWishToCollection?.(id);
-  document.getElementById('modalEdit').onclick = () => { window.closeModal?.(); window.editWish?.(id); };
-  document.getElementById('modalDelete').onclick = () => { if (confirm(t('confirm.deleteGeneric'))) { window.closeModal?.(); deleteWish(id); } };
-  document.getElementById('modalOverlay').style.display = 'flex';
+  return window.openEntityDetail?.('wishlist', id);
 }

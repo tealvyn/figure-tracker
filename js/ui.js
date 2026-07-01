@@ -44,6 +44,12 @@ function shouldIgnoreDuplicateNav(lastAt, gap = 140) {
   return Boolean(lastAt) && now - lastAt < gap;
 }
 
+function isEntitySwipeBlocked(event) {
+  return Boolean(event?.target?.closest?.(
+    'button, a, input, textarea, select, video, [data-no-swipe], [data-no-card-open]'
+  ));
+}
+
 function pushUiHistory(kind) {
   if (!window.history?.pushState || appState.historyLayer === kind) return;
   history.pushState({ figureTrackerLayer: kind }, '');
@@ -63,14 +69,101 @@ export function stopMediaEvent(event) {
 
 export function isCardOpenBlocked(event) {
   return Boolean(event?.target?.closest(
-    'video, audio, button, a, input, select, textarea, [data-no-card-open], .media-video-preview, .media-video-toggle, .media-video-sound, .media-open-btn, .lightbox-arrow, .lightbox-close'
+    'video, audio, button, a, input, select, textarea, [data-no-card-open], [data-no-swipe], [data-no-lightbox-close], .app-video-wrap, .app-video-controls, .app-video-play, .app-video-mute, .media-video-preview, .media-video-toggle, .media-video-sound, .media-open-btn, .lightbox-arrow, .lightbox-close'
   ));
 }
 
 export function pauseAllVideosExcept(exceptVideo = null) {
   document.querySelectorAll('video').forEach(video => {
+    if (video.dataset.gifLike === 'true') return;
     if (video !== exceptVideo && !video.paused) video.pause();
   });
+}
+
+export function updateAppVideoControls(video) {
+  const wrap = video?.closest?.('.app-video-wrap');
+  if (!wrap) return;
+  const playBtn = wrap.querySelector('.app-video-play');
+  const muteBtn = wrap.querySelector('.app-video-mute');
+  if (playBtn) playBtn.textContent = video.paused || video.ended ? '▶' : '⏸';
+  if (muteBtn) muteBtn.textContent = video.muted ? '🔇' : '🔊';
+}
+
+export function toggleAppVideoPlay(event, videoId) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  const video = document.getElementById(videoId);
+  if (!video) return;
+  if (video.paused || video.ended) video.play?.().catch(console.warn);
+  else video.pause();
+  updateAppVideoControls(video);
+}
+
+export function toggleAppVideoMute(event, videoId) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  const video = document.getElementById(videoId);
+  if (!video) return;
+  video.muted = !video.muted;
+  updateAppVideoControls(video);
+}
+
+export function bindAppVideoControls(root = document) {
+  root.querySelectorAll?.('video[data-app-video="true"]').forEach(video => {
+    if (video.dataset.videoBound === 'true') {
+      updateAppVideoControls(video);
+      return;
+    }
+    video.dataset.videoBound = 'true';
+    ['play', 'pause', 'volumechange', 'ended'].forEach(eventName => {
+      video.addEventListener(eventName, () => updateAppVideoControls(video));
+    });
+    updateAppVideoControls(video);
+  });
+}
+
+function createAppVideoElement(src, className = '', wrapClass = '') {
+  const wrap = document.createElement('div');
+  const videoId = `app-video-${crypto.randomUUID()}`;
+  wrap.className = `app-video-wrap ${wrapClass}`.trim();
+  wrap.dataset.noCardOpen = 'true';
+  wrap.dataset.noSwipe = 'true';
+  wrap.dataset.noLightboxClose = 'true';
+  const video = document.createElement('video');
+  video.id = videoId;
+  video.className = `app-video ${className}`.trim();
+  video.src = src;
+  video.playsInline = true;
+  video.preload = 'metadata';
+  video.dataset.appVideo = 'true';
+  video.dataset.noCardOpen = 'true';
+  video.dataset.noSwipe = 'true';
+  video.dataset.noLightboxClose = 'true';
+  const controls = document.createElement('div');
+  controls.className = 'app-video-controls';
+  controls.dataset.noCardOpen = 'true';
+  controls.dataset.noSwipe = 'true';
+  controls.dataset.noLightboxClose = 'true';
+  controls.innerHTML = `
+    <button class="app-video-play" type="button" onclick="toggleAppVideoPlay(event, '${videoId}')">▶</button>
+    <button class="app-video-mute" type="button" onclick="toggleAppVideoMute(event, '${videoId}')">🔇</button>
+  `;
+  wrap.append(video, controls);
+  return { wrap, video };
+}
+
+function captureAppVideoState(sourceVideo) {
+  if (!sourceVideo || sourceVideo.dataset.gifLike === 'true') return null;
+  const wasPaused = sourceVideo.paused;
+  const videoState = {
+    currentTime: sourceVideo.currentTime || 0,
+    paused: wasPaused,
+    muted: sourceVideo.muted,
+    volume: sourceVideo.volume,
+    playbackRate: sourceVideo.playbackRate || 1
+  };
+  if (!wasPaused) sourceVideo.pause();
+  return videoState;
 }
 
 export function syncPreviewVideoToggle(video) {
@@ -337,6 +430,7 @@ export function stopMedia(root = document, options = {}) {
   const resetSrc = Boolean(options.resetSrc);
   root?.querySelectorAll?.('video, audio')?.forEach(media => {
     try {
+      if (media.dataset?.gifLike === 'true') return;
       media.pause();
       media.currentTime = 0;
       if (resetSrc) {
@@ -523,8 +617,7 @@ export function openGlobalSearchResult(index = 0) {
   const result = appState.globalSearchResults?.[Number(index)];
   if (!result?.item?.id) return;
   hideGlobalSearchResults();
-  if (result.type === 'wishlist') openWishModal(result.item.id);
-  else openModal(result.item.id);
+  openEntityDetail(result.type, result.item.id);
 }
 
 export function handleGlobalSearchKeydown(event) {
@@ -912,7 +1005,7 @@ export function renderDetail() {
     const item = normalizeProductMeta(rawItem);
     const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
     const firstMedia = mediaEntriesOf(item)[0]?.media || item.imageUrl || item.img || item.videoUrl;
-    return `<div class="figure-card animate-in" style="animation-delay:${itemIndex * 40}ms" onclick="if(isCardOpenBlocked(event))return;openModal('${H(item.id)}')">
+    return `<div class="figure-card animate-in" style="animation-delay:${itemIndex * 40}ms" onclick="if(isCardOpenBlocked(event))return;openEntityDetail('collection','${H(item.id)}')">
   ${renderMediaTag(firstMedia, 'figure-img', item.name)}
   <div class="figure-body">
     <div class="figure-name">${H(item.name)}</div>
@@ -1333,7 +1426,7 @@ export function renderAnalytics() {
   const forecastEl = document.getElementById('analyticsForecast');
   if (forecastEl) {
     const upcoming = state.items.filter(i => i.status !== 'Получено' && i.releaseDate).sort((a, b) => releaseSortValue(a) - releaseSortValue(b)).slice(0, 6);
-    forecastEl.innerHTML = `<div class="analytics-forecast-title">Ближайший план</div>${upcoming.length ? upcoming.map(i => `<button onclick="openModal('${H(i.id)}')"><span>${H(i.releaseDate || '—')}</span><strong>${H(i.name)}</strong><em>${eur(getItemTotalEur(i))}</em></button>`).join('') : '<div class="dashboard-empty">Нет будущих релизов</div>'}`;
+    forecastEl.innerHTML = `<div class="analytics-forecast-title">Ближайший план</div>${upcoming.length ? upcoming.map(i => `<button onclick="openEntityDetail('collection','${H(i.id)}')"><span>${H(i.releaseDate || '—')}</span><strong>${H(i.name)}</strong><em>${eur(getItemTotalEur(i))}</em></button>`).join('') : '<div class="dashboard-empty">Нет будущих релизов</div>'}`;
   }
 
   if (typeof Chart === 'undefined') return;
@@ -1602,7 +1695,7 @@ grid.innerHTML = visibleItems.map((item, idx) => {
     priceEur ? `€${priceEur.toFixed(2)}` : ''
   ].filter(Boolean).map(H).join(' · ');
 
-  return `<div class="gallery-card animate-in" ${imgs.length > 1 ? `data-gallery-slider="true" data-item-id="${H(item.id)}" data-current-index="0"` : ''} style="animation-delay:${idx * 20}ms;" onclick="if(isCardOpenBlocked(event))return;openProductDetail('collection','${H(item.id)}')">
+  return `<div class="gallery-card animate-in" ${imgs.length > 1 ? `data-gallery-slider="true" data-item-id="${H(item.id)}" data-current-index="0"` : ''} style="animation-delay:${idx * 20}ms;" onclick="if(isCardOpenBlocked(event))return;openEntityDetail('collection','${H(item.id)}')">
       ${mediaHtml}
       <div class="gallery-card-body">
         <div class="gallery-card-title">${H(item.name)}</div>
@@ -1712,6 +1805,7 @@ export function moveWishToCollection(id) {
   const rawWish = (state.wishlist || []).find(x => x.id === id); if (!rawWish) return;
   const w = normalizeProductMeta(rawWish);
   closeModal();
+  appState.pendingUploadedMedia = Array.isArray(w.media) ? [...w.media] : [];
   document.getElementById('fName').value = w.name || ''; document.getElementById('fStore').value = w.store || ''; document.getElementById('fMaker').value = w.manufacturer || '';
   const _dp = (w.releaseDate || '').split(' '); document.getElementById('fDateMonth').value = _dp[0] || ''; document.getElementById('fDateYear').value = _dp[1] || '';
   document.getElementById('fImg').value = (w.imageUrls?.length ? w.imageUrls : (w.imageUrl ? [w.imageUrl] : [])).join(', '); document.getElementById('fShopUrl').value = w.shopUrl || '';
@@ -1818,10 +1912,19 @@ function updateLightboxControls() {
 export function openItemLightbox(ownerType, ownerId, src, index = null, sourceVideo = null) {
   const owner = getLightboxOwner(ownerType, ownerId);
   const items = owner ? mediaEntriesOf(owner) : [];
-  const startTime = Number(sourceVideo?.currentTime || 0);
-  const autoplay = Boolean(sourceVideo && !sourceVideo.paused && !sourceVideo.ended);
-  if (sourceVideo) sourceVideo.pause();
-  openLightbox(src, { items, index, ownerId, ownerType, startTime, autoplay });
+  const videoState = captureAppVideoState(sourceVideo) || (sourceVideo ? (() => {
+    const wasPaused = sourceVideo.paused;
+    const state = {
+      currentTime: sourceVideo.currentTime || 0,
+      paused: wasPaused,
+      muted: sourceVideo.muted,
+      volume: sourceVideo.volume,
+      playbackRate: sourceVideo.playbackRate || 1
+    };
+    if (!wasPaused) sourceVideo.pause();
+    return state;
+  })() : null);
+  openLightbox(src, { items, index, ownerId, ownerType, videoState });
 }
 
 function renderClickableMedia(url, className = '', alt = '', lightboxContext = 'gallery') {
@@ -1842,11 +1945,7 @@ export function editWish(...args) {
   return result;
 }
 export function renderWishlist(...args) { return WishlistView.renderWishlist(...args); }
-export function openWishModal(...args) {
-  const result = WishlistView.openWishModal(...args);
-  pushUiHistory('modal');
-  return result;
-}
+export function openWishModal(id) { return openEntityDetail('wishlist', id); }
 
 function setModalMedia(media, alt = '', lightboxContext = 'modal') {
   const oldEl = document.getElementById('modalImg');
@@ -1866,20 +1965,17 @@ function setModalMedia(media, alt = '', lightboxContext = 'modal') {
     newEl.loop = true;
     newEl.muted = true;
     newEl.playsInline = true;
-    newEl.preload = 'metadata';
+    newEl.preload = 'auto';
     newEl.src = safeUrl;
+    newEl.dataset.gifLike = 'true';
+    newEl.dataset.noSwipe = 'true';
+    newEl.dataset.noLightboxClose = 'true';
     newEl.onclick = stopVideoEvent;
-    newEl.onpointerdown = stopVideoEvent;
-    newEl.ontouchstart = stopVideoEvent;
   } else if (kind === 'video') {
-    newEl = document.createElement('video');
-    newEl.controls = true;
-    newEl.preload = 'metadata';
-    newEl.playsInline = true;
-    newEl.src = safeUrl;
-    newEl.onclick = stopVideoEvent;
-    newEl.onpointerdown = stopVideoEvent;
-    newEl.ontouchstart = stopVideoEvent;
+    const appVideo = createAppVideoElement(safeUrl, 'modal-img', 'modal-img');
+    newEl = appVideo.wrap;
+    newEl.style.display = safeUrl ? 'block' : 'none';
+    bindAppVideoControls(newEl);
   } else {
     newEl = document.createElement('img');
     newEl.src = safeUrl;
@@ -1887,6 +1983,7 @@ function setModalMedia(media, alt = '', lightboxContext = 'modal') {
 
     newEl.onclick = (event) => {
       event.stopPropagation();
+      if (appState.entityDetailSuppressClick) return;
       if (safeUrl) openLightbox(safeUrl, lightboxContext);
     };
   }
@@ -1895,7 +1992,7 @@ function setModalMedia(media, alt = '', lightboxContext = 'modal') {
   if (newEl.tagName === 'VIDEO') newEl.dataset.noCardOpen = 'true';
 
   // zoomable только для фото, не для видео/gif-анимаций
-  newEl.className = 'modal-img ' + (safeUrl && kind === 'image' ? 'zoomable' : '');
+  if (kind !== 'video') newEl.className = 'modal-img ' + (safeUrl && kind === 'image' ? 'zoomable' : '');
 
   if (resolvedMedia && typeof resolvedMedia === 'object') {
     if (resolvedMedia.provider) newEl.dataset.provider = resolvedMedia.provider;
@@ -1912,6 +2009,7 @@ function setModalMedia(media, alt = '', lightboxContext = 'modal') {
   newEl.style.display = safeUrl ? 'block' : 'none';
 
   oldEl.replaceWith(newEl);
+  if (kind === 'video') bindAppVideoControls(newEl);
 }
 
 function setLightboxMedia(media, alt = '', options = {}) {
@@ -1924,39 +2022,22 @@ function setLightboxMedia(media, alt = '', options = {}) {
   const kind = getMediaKind(resolvedMedia);
 
   let newEl;
-  const stopVideoEvent = (event) => stopMediaEvent(event);
-
+  let mediaEl;
   if (kind === 'animation') {
     newEl = document.createElement('video');
     newEl.autoplay = true;
     newEl.loop = true;
     newEl.muted = true;
     newEl.playsInline = true;
-    newEl.preload = 'metadata';
+    newEl.preload = 'auto';
     newEl.src = safeUrl;
-    newEl.onclick = stopVideoEvent;
-    newEl.onpointerdown = stopVideoEvent;
-    newEl.ontouchstart = stopVideoEvent;
+    newEl.dataset.gifLike = 'true';
+    newEl.dataset.noSwipe = 'true';
+    newEl.dataset.noLightboxClose = 'true';
   } else if (kind === 'video') {
-    newEl = document.createElement('video');
-    newEl.controls = true;
-    newEl.preload = 'metadata';
-    newEl.playsInline = true;
-    newEl.src = safeUrl;
-    newEl.onclick = stopVideoEvent;
-    newEl.onpointerdown = stopVideoEvent;
-    newEl.ontouchstart = stopVideoEvent;
-    const startTime = Number(options.startTime || 0);
-    if (startTime > 0) {
-      newEl.addEventListener('loadedmetadata', () => {
-        try { newEl.currentTime = Math.min(startTime, Number(newEl.duration || startTime)); } catch {}
-      }, { once: true });
-    }
-    if (options.autoplay) {
-      newEl.addEventListener('canplay', () => {
-        newEl.play?.().catch(() => null);
-      }, { once: true });
-    }
+    const appVideo = createAppVideoElement(safeUrl, 'lightbox-media lightbox-video', 'lightbox-video-wrap');
+    newEl = appVideo.wrap;
+    mediaEl = appVideo.video;
   } else {
     newEl = document.createElement('img');
     newEl.src = safeUrl;
@@ -1966,24 +2047,50 @@ function setLightboxMedia(media, alt = '', options = {}) {
 
   newEl.id = 'lightboxImg';
   if (newEl.tagName === 'VIDEO') newEl.dataset.noCardOpen = 'true';
+  if (mediaEl) mediaEl.dataset.noCardOpen = 'true';
 
   if (kind === 'animation') {
-    newEl.className = 'lightbox-media lightbox-animation';
-  } else if (kind === 'video') {
-    newEl.className = 'lightbox-media lightbox-video';
+    newEl.className = 'lightbox-media lightbox-video lightbox-gif-video lightbox-animation';
   } else {
-    newEl.className = 'lightbox-media';
+    if (kind !== 'video') newEl.className = 'lightbox-media';
   }
 
   newEl.style.display = safeUrl ? 'block' : 'none';
 
   oldEl.replaceWith(newEl);
-  pauseAllVideosExcept(newEl.tagName === 'VIDEO' ? newEl : null);
+  pauseAllVideosExcept(mediaEl || (newEl.tagName === 'VIDEO' ? newEl : null));
+  if (mediaEl) bindAppVideoControls(newEl);
+  if (mediaEl) applyLightboxVideoState();
+}
+
+function applyLightboxVideoState() {
+  const state = appState.lightboxVideoState;
+  if (!state) return;
+  const video = document.querySelector('#lightboxOverlay video[data-app-video="true"]');
+  if (!video) return;
+  const apply = () => {
+    try {
+      if (Number.isFinite(state.currentTime) && state.currentTime > 0) {
+        video.currentTime = Math.min(state.currentTime, video.duration || state.currentTime);
+      }
+      video.muted = Boolean(state.muted);
+      if (typeof state.volume === 'number') video.volume = Math.max(0, Math.min(1, state.volume));
+      if (state.playbackRate) video.playbackRate = state.playbackRate;
+      updateAppVideoControls(video);
+      if (!state.paused) video.play?.().catch(console.warn);
+    } catch (error) {
+      console.warn('[lightbox video state] failed', error);
+    } finally {
+      appState.lightboxVideoState = null;
+    }
+  };
+  if (video.readyState >= 1) apply();
+  else video.addEventListener('loadedmetadata', apply, { once: true });
 }
 
 function productDetailRow(label, value, isHtml = false) {
   if (value == null || value === '') return '';
-  return `<div class="modal-row product-detail-row"><span class="modal-label">${H(label)}</span>${isHtml ? `<span>${value}</span>` : `<span>${H(value)}</span>`}</div>`;
+  return `<div class="modal-row entity-detail-row product-detail-row"><span class="modal-label">${H(label)}</span>${isHtml ? `<span>${value}</span>` : `<span>${H(value)}</span>`}</div>`;
 }
 
 function productDetailLink(label, url, text = '') {
@@ -2026,10 +2133,38 @@ function buildCollectionDetailRows(item, priceEur) {
   ].filter(Boolean).join('');
 }
 
+function buildWishlistDetailRows(item, priceEur) {
+  const sku = item.sku || item.code || '';
+  const priority = {
+    high: t('wishlist.definitelyWant'),
+    mid: t('wishlist.want'),
+    low: t('wishlist.ifCheap')
+  }[item.priority] || item.priority;
+  return [
+    productDetailRow(t('modal.priority'), priority),
+    productDetailRow(t('modal.store'), item.store),
+    productDetailRow(t('modal.manufacturer'), item.manufacturer),
+    productDetailRow(t('wishlist.release'), item.releaseDate),
+    productDetailRow(t('modal.price'), item.priceOriginal ? `${item.priceOriginal} ${item.currency || ''} · €${priceEur.toFixed(2)}` : ''),
+    productDetailLink(t('modal.productPage'), item.shopUrl, t('common.openStore')),
+    productDetailRow('Источник импорта', item.source),
+    productDetailLink('Ссылка-источник', item.sourceUrl),
+    productDetailRow('JAN / EAN', item.jan),
+    productDetailRow('SKU / код', sku),
+    productDetailRow('Старт предзаказа', item.preorderStart),
+    productDetailRow('Окончание предзаказа', item.preorderEnd),
+    productDetailRow('Статус релиза', item.releaseStatus && item.releaseStatus !== 'unknown' ? item.releaseStatus : ''),
+    item.tags?.length ? productDetailRow(t('modal.tags'), `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true) : '',
+    productDetailRow(t('modal.notes'), item.notes || item.note)
+  ].filter(Boolean).join('');
+}
+
 function renderProductDetailThumbs(items, activeIndex, ownerId, onSelect, ownerType = 'collection') {
   const mediaFrame = document.getElementById('modalImg')?.parentElement;
   if (!mediaFrame) return;
-  mediaFrame.classList.add('product-detail-media');
+  mediaFrame.classList.add('entity-detail-media', 'product-detail-media');
+  mediaFrame.setAttribute('ontouchstart', 'onEntityMediaTouchStart(event)');
+  mediaFrame.setAttribute('ontouchend', 'onEntityMediaTouchEnd(event)');
   let lightboxBtn = document.getElementById('productDetailLightboxBtn');
   if (!lightboxBtn) {
     lightboxBtn = document.createElement('button');
@@ -2044,22 +2179,20 @@ function renderProductDetailThumbs(items, activeIndex, ownerId, onSelect, ownerT
     const entries = appState.productDetailMedia || items;
     const index = Math.max(0, Math.min(entries.length - 1, Number(appState.productDetailMediaIndex ?? activeIndex) || 0));
     const entry = entries[index];
-    const sourceVideo = mediaFrame.querySelector('video');
-    const startTime = Number(sourceVideo?.currentTime || 0);
-    const autoplay = Boolean(sourceVideo && !sourceVideo.paused && !sourceVideo.ended);
-    if (sourceVideo) sourceVideo.pause();
-    if (entry?.url) openLightbox(entry.url, { items: entries, index, ownerId, ownerType, startTime, autoplay });
+    const sourceVideo = mediaFrame.querySelector('video[data-app-video="true"]') || mediaFrame.querySelector('video');
+    const videoState = captureAppVideoState(sourceVideo);
+    if (entry?.url) openLightbox(entry.url, { items: entries, index, ownerId, ownerType, videoState });
   };
   lightboxBtn.style.display = items.length ? 'inline-flex' : 'none';
   let thumbs = document.getElementById('productDetailThumbs');
   if (!thumbs) {
     thumbs = document.createElement('div');
     thumbs.id = 'productDetailThumbs';
-    thumbs.className = 'product-detail-thumbs';
+    thumbs.className = 'entity-detail-thumbs product-detail-thumbs';
     mediaFrame.insertAdjacentElement('afterend', thumbs);
   }
   thumbs.innerHTML = items.length > 1 ? items.map((entry, idx) => (
-    `<button type="button" class="${idx === activeIndex ? 'active' : ''}" data-media-index="${idx}">
+    `<button type="button" class="entity-detail-thumb${idx === activeIndex ? ' active' : ''}" data-media-index="${idx}">
       ${entry.kind === 'video' || entry.kind === 'animation' ? '<span>▶</span>' : `<img src="${H(entry.url)}" alt="">`}
     </button>`
   )).join('') : '';
@@ -2069,91 +2202,185 @@ function renderProductDetailThumbs(items, activeIndex, ownerId, onSelect, ownerT
 }
 
 export function openProductDetail(type, id) {
-  if (type === 'wishlist') return openWishModal(id);
-  return openModal(id);
+  return openEntityDetail(type, id);
 }
 
-export function openModal(id) {
+export function entityDetailNav(direction) {
+  const entries = appState.entityDetail?.media || [];
+  if (entries.length <= 1) return;
+  if (shouldIgnoreDuplicateNav(lastProductDetailNavAt)) return;
+  lastProductDetailNavAt = performance.now();
+  const current = Number(appState.entityDetail?.mediaIndex || 0);
+  const next = (current + direction + entries.length) % entries.length;
+  appState.entityDetail.mediaIndex = next;
+  appState.productDetailMediaIndex = next;
+  appState.entityDetailUpdate?.();
+}
+
+export function onEntityMediaTouchStart(event) {
+  if (isEntitySwipeBlocked(event)) {
+    appState.entityDetailTouchStartX = null;
+    appState.entityDetailTouchStartY = null;
+    return;
+  }
+  const touch = event.touches?.[0];
+  if (!touch) return;
+  appState.entityDetailTouchStartX = touch.clientX;
+  appState.entityDetailTouchStartY = touch.clientY;
+}
+
+export function onEntityMediaTouchEnd(event) {
+  if (isEntitySwipeBlocked(event)) {
+    appState.entityDetailTouchStartX = null;
+    appState.entityDetailTouchStartY = null;
+    return;
+  }
+  const touch = event.changedTouches?.[0];
+  if (!touch || appState.entityDetailTouchStartX == null) return;
+  const dx = touch.clientX - appState.entityDetailTouchStartX;
+  const dy = touch.clientY - appState.entityDetailTouchStartY;
+  appState.entityDetailTouchStartX = null;
+  appState.entityDetailTouchStartY = null;
+  if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+  appState.entityDetailSuppressClick = true;
+  setTimeout(() => { appState.entityDetailSuppressClick = false; }, 250);
+  entityDetailNav(dx < 0 ? 1 : -1);
+}
+
+export function openEntityDetail(type, id) {
   pauseAllVideosExcept();
-  document.getElementById('modalMove').style.display = 'none';
-  const rawItem = state.items.find(i => i.id === id); if (!rawItem) return;
+  const ownerType = type === 'wishlist' ? 'wishlist' : 'collection';
+  const source = ownerType === 'wishlist' ? (state.wishlist || []) : (state.items || []);
+  const rawItem = source.find(item => item.id === id);
+  if (!rawItem) {
+    console.warn('[openEntityDetail] item not found', { type: ownerType, id });
+    toast?.(t('toast.notFound') || 'Item not found');
+    return;
+  }
   const item = normalizeProductMeta(rawItem);
   appState.modalItemId = id;
   const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
-  document.getElementById('modalOverlay')?.classList.add('product-detail-overlay');
-  document.querySelector('#modalOverlay .modal-box')?.classList.add('product-detail-modal');
-  document.querySelector('#modalOverlay .modal-body')?.classList.add('product-detail-info');
-  document.getElementById('modalName')?.classList.add('product-detail-title');
+  const overlay = document.getElementById('modalOverlay');
+  overlay?.classList.add('entity-detail-overlay', 'product-detail-overlay');
+  overlay?.classList.toggle('wishlist-detail-overlay', ownerType === 'wishlist');
+  const modalBox = document.querySelector('#modalOverlay .modal-box');
+  modalBox?.classList.add('entity-detail-modal', 'product-detail-modal');
+  let backBtn = document.getElementById('entityDetailBack');
+  if (!backBtn && modalBox) {
+    backBtn = document.createElement('button');
+    backBtn.id = 'entityDetailBack';
+    backBtn.type = 'button';
+    backBtn.className = 'icon-action-btn entity-detail-back';
+    backBtn.dataset.noSwipe = 'true';
+    backBtn.setAttribute('aria-label', t('common.close'));
+    backBtn.textContent = '←';
+    backBtn.onclick = event => {
+      event.stopPropagation();
+      closeEntityDetail();
+    };
+    modalBox.prepend(backBtn);
+  }
+  if (backBtn) backBtn.style.display = 'inline-flex';
+  const modalClose = document.getElementById('modalClose');
+  if (modalClose) modalClose.style.display = 'none';
+  document.querySelector('#modalOverlay .modal-actions')?.classList.add('entity-detail-actions');
+  document.querySelector('#modalOverlay .modal-body')?.classList.add('entity-detail-info', 'product-detail-info');
+  document.getElementById('modalName')?.classList.add('entity-detail-title', 'product-detail-title');
   document.getElementById('modalName').textContent = item.name || '—';
-  document.getElementById('modalRows').classList.add('product-detail-meta-grid');
-  document.getElementById('modalRows').innerHTML = buildCollectionDetailRows(item, priceEur);
+  document.getElementById('modalRows').classList.add('entity-detail-rows', 'product-detail-meta-grid');
+  document.getElementById('modalRows').innerHTML = ownerType === 'wishlist'
+    ? buildWishlistDetailRows(item, priceEur)
+    : buildCollectionDetailRows(item, priceEur);
 
   const imgs = mediaEntriesOf(item);
+  appState.entityDetail = { type: ownerType, id, media: imgs, mediaIndex: 0 };
   appState.productDetailMedia = imgs;
   appState.productDetailMediaIndex = 0;
   window.currentModalImages = imgs.map(img => img.url);
   window.currentModalMedia = imgs;
   function updateModalImg() {
-    const entries = appState.productDetailMedia || imgs;
-    const imgIdx = Math.max(0, Math.min(entries.length - 1, Number(appState.productDetailMediaIndex) || 0));
+    const detail = appState.entityDetail || {};
+    const entries = detail.media || appState.productDetailMedia || imgs;
+    const imgIdx = Math.max(0, Math.min(entries.length - 1, Number(detail.mediaIndex ?? appState.productDetailMediaIndex) || 0));
+    if (appState.entityDetail) appState.entityDetail.mediaIndex = imgIdx;
     appState.productDetailMediaIndex = imgIdx;
     setModalMedia(entries[imgIdx]?.media || '', item?.name || '', {
       items: entries,
       index: imgIdx,
       ownerId: id,
-      ownerType: 'collection'
+      ownerType
     });
     document.getElementById('modalImgCounter').textContent = entries.length > 1 ? `${imgIdx + 1} / ${entries.length}` : '';
     document.getElementById('modalImgPrev').style.display = entries.length > 1 ? 'flex' : 'none'; document.getElementById('modalImgNext').style.display = entries.length > 1 ? 'flex' : 'none';
-    renderProductDetailThumbs(entries, imgIdx, id, nextIdx => { appState.productDetailMediaIndex = nextIdx; updateModalImg(); });
+    renderProductDetailThumbs(entries, imgIdx, id, nextIdx => {
+      if (appState.entityDetail) appState.entityDetail.mediaIndex = nextIdx;
+      appState.productDetailMediaIndex = nextIdx;
+      updateModalImg();
+    }, ownerType);
   }
+  appState.entityDetailUpdate = updateModalImg;
 
   const receiveBtn = document.getElementById('modalReceive');
-  if (item.status === 'Получено') { receiveBtn.style.display = 'none'; } else {
-    receiveBtn.style.display = 'flex'; receiveBtn.onclick = () => { state.items.find(i => i.id === id).status = 'Получено'; persist(); render(); renderShelf(); toast(t('toast.itemReceived')); closeModal(); };
-  }
-  document.getElementById('modalImgPrev').onclick = () => {
-    if (shouldIgnoreDuplicateNav(lastProductDetailNavAt)) return;
-    lastProductDetailNavAt = performance.now();
-    const entries = appState.productDetailMedia || [];
-    if (entries.length <= 1) return;
-    appState.productDetailMediaIndex = (Number(appState.productDetailMediaIndex || 0) - 1 + entries.length) % entries.length;
-    updateModalImg();
-  };
-  document.getElementById('modalImgNext').onclick = () => {
-    if (shouldIgnoreDuplicateNav(lastProductDetailNavAt)) return;
-    lastProductDetailNavAt = performance.now();
-    const entries = appState.productDetailMedia || [];
-    if (entries.length <= 1) return;
-    appState.productDetailMediaIndex = (Number(appState.productDetailMediaIndex || 0) + 1) % entries.length;
-    updateModalImg();
-  };
+  if (ownerType === 'collection' && item.status !== 'Получено') {
+    receiveBtn.style.display = 'flex'; receiveBtn.onclick = () => { state.items.find(i => i.id === id).status = 'Получено'; persist(); render(); renderShelf(); toast(t('toast.itemReceived')); closeEntityDetail(); };
+  } else receiveBtn.style.display = 'none';
+  const moveBtn = document.getElementById('modalMove');
+  moveBtn.style.display = ownerType === 'wishlist' ? 'flex' : 'none';
+  moveBtn.onclick = ownerType === 'wishlist' ? () => moveWishToCollection(id) : null;
+  document.getElementById('modalImgPrev').onclick = () => entityDetailNav(-1);
+  document.getElementById('modalImgNext').onclick = () => entityDetailNav(1);
   updateModalImg();
-  document.getElementById('modalEdit').onclick = () => { closeModal(); editItem(id); };
-  document.getElementById('modalDelete').onclick = () => { if (confirm(t('confirm.deleteGeneric'))) { closeModal(); deleteItem(id); } };
-  document.getElementById('modalOverlay').style.display = 'flex'; document.getElementById('modalMove').style.display = 'none';
+  document.getElementById('modalEdit').onclick = () => { closeEntityDetail(); ownerType === 'wishlist' ? editWish(id) : editItem(id); };
+  document.getElementById('modalDelete').onclick = () => {
+    if (ownerType === 'wishlist') {
+      deleteWish(id);
+      if (!(state.wishlist || []).some(item => item.id === id)) closeEntityDetail();
+      return;
+    }
+    deleteItem(id);
+    if (!(state.items || []).some(item => item.id === id)) closeEntityDetail();
+  };
+  overlay.style.display = 'flex';
   pushUiHistory('modal');
 }
 
-export function closeModal() {
+export function openModal(id) { return openEntityDetail('collection', id); }
+
+export function closeEntityDetail() {
   stopMedia(document.getElementById('modalOverlay'), { resetSrc: true });
   document.getElementById('modalOverlay').style.display = 'none'; appState.modalItemId = null;
   document.getElementById('modalOverlay')?.classList.remove('product-detail-overlay');
   document.getElementById('modalOverlay')?.classList.remove('wishlist-detail-overlay');
-  document.querySelector('#modalOverlay .modal-box')?.classList.remove('product-detail-modal', 'wishlist-detail-modal');
-  document.querySelector('#modalOverlay .modal-body')?.classList.remove('product-detail-info', 'wishlist-detail-info');
-  document.getElementById('modalName')?.classList.remove('product-detail-title');
-  document.getElementById('modalRows')?.classList.remove('product-detail-meta-grid');
-  document.getElementById('modalImg')?.parentElement?.classList.remove('product-detail-media', 'wishlist-detail-media');
+  document.getElementById('modalOverlay')?.classList.remove('entity-detail-overlay');
+  document.querySelector('#modalOverlay .modal-box')?.classList.remove('entity-detail-modal', 'product-detail-modal', 'wishlist-detail-modal');
+  document.querySelector('#modalOverlay .modal-actions')?.classList.remove('entity-detail-actions');
+  document.querySelector('#modalOverlay .modal-body')?.classList.remove('entity-detail-info', 'product-detail-info', 'wishlist-detail-info');
+  document.getElementById('modalName')?.classList.remove('entity-detail-title', 'product-detail-title');
+  document.getElementById('modalRows')?.classList.remove('entity-detail-rows', 'product-detail-meta-grid');
+  document.getElementById('modalImg')?.parentElement?.classList.remove('entity-detail-media', 'product-detail-media', 'wishlist-detail-media');
   document.getElementById('productDetailLightboxBtn')?.remove();
   document.getElementById('productDetailThumbs')?.remove();
+  document.getElementById('entityDetailBack')?.remove();
   window.currentModalMedia = [];
+  appState.entityDetail = null;
+  appState.entityDetailUpdate = null;
+  appState.entityDetailTouchStartX = null;
+  appState.entityDetailTouchStartY = null;
+  appState.entityDetailSuppressClick = false;
   appState.productDetailMedia = [];
   appState.productDetailMediaIndex = 0;
   if (appState.historyLayer === 'modal') appState.historyLayer = null;
   document.getElementById('modalImgPrev').onclick = null; document.getElementById('modalImgNext').onclick = null; document.getElementById('modalImgCounter').textContent = '';
   document.getElementById('modalImgPrev').style.display = 'none'; document.getElementById('modalImgNext').style.display = 'none';
+  document.getElementById('modalMove').onclick = null;
+  document.getElementById('modalMove').style.display = 'none';
+  document.getElementById('modalReceive').onclick = null;
+  document.getElementById('modalReceive').style.display = 'none';
+  const modalClose = document.getElementById('modalClose');
+  if (modalClose) modalClose.style.display = '';
 }
+
+export function closeModal() { return closeEntityDetail(); }
 
 export function renderShelf() {
   const sort = document.getElementById('shelfSort')?.value || 'newest';
@@ -2207,7 +2434,7 @@ export function renderShelf() {
             <button class="icon-action-btn media-open-btn" type="button" title="${t('common.open')}" onclick="event.stopPropagation();openItemLightbox('collection','${H(item.id)}','${H(first.url)}',0,this.closest('.gallery-video-wrap')?.querySelector('video'))">⛶</button>
           </div>`;
     return `
-    <div class="gallery-card animate-in" style="animation-delay:${idx * 30}ms" onclick="if(isCardOpenBlocked(event))return;openModal('${H(item.id)}')">
+    <div class="gallery-card animate-in" style="animation-delay:${idx * 30}ms" onclick="if(isCardOpenBlocked(event))return;openEntityDetail('collection','${H(item.id)}')">
       <div class="gallery-img-wrap">
         ${mediaHtml}
         <div class="gallery-overlay"><div class="gallery-name">${H(item.name)}</div><div class="gallery-price">€${item.totalPaid.toFixed(2)}</div></div>
@@ -2235,10 +2462,10 @@ export function openLightbox(src, context = 'gallery') {
   appState.lightboxPhotos = items.map(item => item.url);
   appState.lightboxIndex = index;
   appState.lightboxCurrentUrl = items[index]?.url || srcUrl;
+  appState.lightboxVideoState = context && typeof context === 'object' ? (context.videoState || null) : null;
 
   setLightboxMedia(items[index]?.media || items[index]?.url || src, '', {
-    startTime: context && typeof context === 'object' ? context.startTime : 0,
-    autoplay: Boolean(context && typeof context === 'object' && context.autoplay)
+    videoState: appState.lightboxVideoState
   });
 
   overlay.style.display = 'flex';
@@ -2251,6 +2478,7 @@ export function openLightbox(src, context = 'gallery') {
 export function showLightboxPhoto() {
   const items = appState.lightboxItems || [];
   const current = items[appState.lightboxIndex];
+  appState.lightboxVideoState = null;
   setLightboxMedia(current?.media || current?.url || appState.lightboxPhotos?.[appState.lightboxIndex]);
   appState.lightboxCurrentUrl = current?.url || appState.lightboxCurrentUrl || '';
   updateLightboxControls();
@@ -2267,6 +2495,7 @@ export function lightboxNav(dir) {
 
   const current = items[appState.lightboxIndex];
   appState.lightboxCurrentUrl = current?.url || '';
+  appState.lightboxVideoState = null;
   pauseAllVideosExcept();
   setLightboxMedia(current?.media || current?.url || '');
   updateLightboxControls();
@@ -2280,20 +2509,31 @@ export function closeLightbox() {
   if (overlay) overlay.style.display = 'none';
   if (appState.historyLayer === 'lightbox') appState.historyLayer = null;
   appState.lightboxCurrentUrl = '';
+  appState.lightboxGestureLocked = false;
+  appState.lightboxTouchStartX = appState.lightboxTouchStartY = null;
   document.removeEventListener('keydown', lightboxKeyHandler);
 }
 export function initLightboxTouch() {
   const overlay = document.getElementById('lightboxOverlay'); if (!overlay || appState.lightboxTouchInitialized) return;
   appState.lightboxTouchInitialized = true;
+  const isInteractiveLightboxTarget = target => Boolean(target?.closest?.(
+    'video, audio, .app-video-wrap, .app-video-controls, .app-video-play, .app-video-mute, button, a, input, textarea, select, [data-no-swipe], [data-no-lightbox-close]'
+  ));
   overlay.addEventListener('touchstart', e => {
-    if (e.target?.closest?.('.lightbox-arrow, .lightbox-close, .lightbox-media, #lightboxImg, video, button')) {
+    appState.lightboxGestureLocked = isInteractiveLightboxTarget(e.target);
+    if (appState.lightboxGestureLocked) {
       appState.lightboxTouchStartX = appState.lightboxTouchStartY = null;
       return;
     }
     if (!e.touches.length) return; appState.lightboxTouchStartX = e.touches[0].clientX; appState.lightboxTouchStartY = e.touches[0].clientY;
   }, { passive: true });
   overlay.addEventListener('touchend', e => {
-    if (e.target?.closest?.('.lightbox-arrow, .lightbox-close, .lightbox-media, #lightboxImg, video, button')) {
+    if (appState.lightboxGestureLocked) {
+      appState.lightboxGestureLocked = false;
+      appState.lightboxTouchStartX = appState.lightboxTouchStartY = null;
+      return;
+    }
+    if (isInteractiveLightboxTarget(e.target)) {
       appState.lightboxTouchStartX = appState.lightboxTouchStartY = null;
       return;
     }
@@ -2323,7 +2563,7 @@ export function renderCalendar() {
     let classes = 'calendar-month';
     if (appState.currentCalendarYear === currentYear && m === currentMonth) classes += ' current';
     else if (appState.currentCalendarYear < currentYear || (appState.currentCalendarYear === currentYear && m < currentMonth)) classes += ' past';
-    html += `<div class="${classes}"><div class="month-name"><span>${MONTH_NAMES[m]}</span><span style="font-size:12px;color:var(--muted);font-weight:normal;">${itemsInMonth.length ? itemsInMonth.length + ' шт.' : ''}</span></div><div class="month-items">${itemsInMonth.length ? itemsInMonth.map(item => `<div class="calendar-item" onclick="if(isCardOpenBlocked(event))return;${item._type === 'collection' ? `openModal('${H(item.id)}')` : `openWishModal('${H(item.id)}')`}">${item.imageUrl
+    html += `<div class="${classes}"><div class="month-name"><span>${MONTH_NAMES[m]}</span><span style="font-size:12px;color:var(--muted);font-weight:normal;">${itemsInMonth.length ? itemsInMonth.length + ' шт.' : ''}</span></div><div class="month-items">${itemsInMonth.length ? itemsInMonth.map(item => `<div class="calendar-item" onclick="if(isCardOpenBlocked(event))return;openEntityDetail('${item._type === 'collection' ? 'collection' : 'wishlist'}','${H(item.id)}')">${item.imageUrl
       ? renderClickableMedia(item.imageUrl, 'figure-img', item.name, item.id)
       : `<div class="figure-img" style="display:flex;align-items:center;justify-content:center;font-size:36px;">📦</div>`}<div class="calendar-item-info"><div class="calendar-item-name">${H(item.name)}</div><div class="calendar-item-type">${item._type === 'collection' ? '📦 В коллекции/Предзаказ' : '⭐ Вишлист'}</div></div></div>`).join('') : '<div style="font-size:12px;color:var(--faint);text-align:center;padding:14px 0;">Нет релизов</div>'}</div></div>`;
   }

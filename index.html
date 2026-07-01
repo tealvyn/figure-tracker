@@ -385,14 +385,14 @@
   </div>
 
   <!-- ЛАЙТБОКС (ГАЛЕРЕЯ НА ВЕСЬ ЭКРАН) -->
-  <div class="lightbox-overlay" id="lightboxOverlay" style="display:none;" onclick="closeLightbox()">
+  <div class="lightbox-overlay" id="lightboxOverlay" style="display:none;" onclick="if(event.target===this)closeLightbox()">
     <!-- Стрелка влево -->
-    <button class="icon-action-btn lightbox-arrow left" title="Назад" data-i18n-title="calendar.prevYear"
+    <button class="icon-action-btn lightbox-arrow lightbox-nav lightbox-prev left" title="Назад" data-i18n-title="calendar.prevYear"
       onclick="event.stopPropagation();lightboxNav(-1)">‹</button>
 
     <img id="lightboxImg" alt="" onclick="event.stopPropagation()">
 
-    <button class="icon-action-btn lightbox-arrow right" title="Вперёд" data-i18n-title="calendar.nextYear"
+    <button class="icon-action-btn lightbox-arrow lightbox-nav lightbox-next right" title="Вперёд" data-i18n-title="calendar.nextYear"
       onclick="event.stopPropagation();lightboxNav(1)">›</button>
 
     <div id="lightboxCounter" class="lightbox-counter"></div>
@@ -726,9 +726,15 @@
           </div>
         </details>
         <div class="form-group full">
-          <div class="form-label" data-i18n="wish.image">Ссылка на картинку</div><textarea id="wImg"
-            placeholder="https://img.amiami.com/1.jpg, https://img.amiami.com/2.jpg"
-            style="width:100%;min-height:60px;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+          <div class="form-label" data-i18n="wish.image">Ссылка на картинку</div>
+          <div class="input-with-button upload-input-group" style="display:flex; gap:8px; align-items:flex-start;">
+            <textarea id="wImg"
+              placeholder="https://img.amiami.com/1.jpg, https://img.amiami.com/2.jpg"
+              style="flex:1;width:100%;min-height:60px;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('wImgFile').click()">
+              <span data-i18n="common.upload">Загрузить</span></button>
+          </div>
+          <input type="file" id="wImgFile" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" multiple style="display:none;" />
         </div>
         <div class="form-group full">
           <div class="form-label" data-i18n="form.productUrl">Ссылка на страницу товара</div>

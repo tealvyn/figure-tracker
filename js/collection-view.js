@@ -79,7 +79,7 @@ export function renderReleaseRows(items, emptyText) {
   if (!items.length) return `<div class="dashboard-empty">${emptyText}</div>`;
   return items.slice(0, 5).map(item => {
     const price = getItemTotalEur(item);
-    return `<button class="dashboard-row" onclick="openModal('${H(item.id)}')">
+    return `<button class="dashboard-row" onclick="openEntityDetail('collection','${H(item.id)}')">
       ${item.imageUrl ? `<img src="${H(item.imageUrl)}" alt="" loading="lazy" onerror="this.style.opacity='.1'">` : `<span class="dashboard-row-icon">📅</span>`}
       <span class="dashboard-row-main"><strong>${H(item.name)}</strong><small>${H(item.releaseDate || '—')} · ${H(item.store || '—')}</small></span>
       <span class="dashboard-row-side"><span class="badge ${getBadgeClass(item.status)}">${H(item.status || '—')}</span><b>${eur(price)}</b></span>
