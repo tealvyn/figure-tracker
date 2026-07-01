@@ -41,11 +41,11 @@ document.addEventListener('DOMContentLoaded', () => {
   UI.initPreviewVideoControlsObserver();
   UI.checkReleaseReminders();
   UI.initParticles();
-
+updateBanner(true);
   setInterval(() => {
     UI.checkReleaseReminders();
     UI.updateBanner(true);
-  }, 10000);
+  }, 30000);
 });
 
 function appendImageUrl(existingValue, url) {

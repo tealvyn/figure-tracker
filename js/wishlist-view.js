@@ -7,6 +7,12 @@ import { buildSearchText, formatReleaseDate, mergeTags, normalizeProductMeta, re
 import { getMediaKind, getMediaUrl, isTelegramFileUrl } from './media-storage.js';
 
 const PRIORITY_COLOR = { high: 'var(--red)', mid: 'var(--yellow)', low: 'var(--muted)' };
+let lastWishDetailNavAt = 0;
+
+function shouldIgnoreDuplicateNav(lastAt, gap = 140) {
+  const now = performance.now();
+  return Boolean(lastAt) && now - lastAt < gap;
+}
 
 function priorityLabel(priority) {
   const labels = {
@@ -290,25 +296,49 @@ export function openWishModal(id) {
   const w = normalizeProductMeta(rawWish);
   const priceEur = toEur(w.priceOriginal || 0, w.currency || 'EUR');
   const imgs = wishlistMediaEntries(w);
-  let imgIdx = 0;
+  appState.productDetailMedia = imgs;
+  appState.productDetailMediaIndex = 0;
   let modalImg = document.getElementById('modalImg');
 
   function updateWishModalImg() {
+    const entries = appState.productDetailMedia || imgs;
+    const imgIdx = Math.max(0, Math.min(entries.length - 1, Number(appState.productDetailMediaIndex) || 0));
+    appState.productDetailMediaIndex = imgIdx;
     window.stopMedia?.(document.getElementById('modalOverlay'), { resetSrc: true });
-    modalImg = setWishModalMedia(modalImg, imgs[imgIdx], w.name, {
-      items: imgs,
+    modalImg = setWishModalMedia(modalImg, entries[imgIdx], w.name, {
+      items: entries,
       index: imgIdx,
       ownerId: id,
       ownerType: 'wishlist'
     });
-    document.getElementById('modalImgCounter').textContent = imgs.length > 1 ? `${imgIdx + 1} / ${imgs.length}` : '';
-    document.getElementById('modalImgPrev').style.display = imgs.length > 1 ? 'flex' : 'none';
-    document.getElementById('modalImgNext').style.display = imgs.length > 1 ? 'flex' : 'none';
+    document.getElementById('modalImgCounter').textContent = entries.length > 1 ? `${imgIdx + 1} / ${entries.length}` : '';
+    document.getElementById('modalImgPrev').style.display = entries.length > 1 ? 'flex' : 'none';
+    document.getElementById('modalImgNext').style.display = entries.length > 1 ? 'flex' : 'none';
   }
 
-  document.getElementById('modalImgPrev').onclick = () => { imgIdx = (imgIdx - 1 + imgs.length) % imgs.length; updateWishModalImg(); };
-  document.getElementById('modalImgNext').onclick = () => { imgIdx = (imgIdx + 1) % imgs.length; updateWishModalImg(); };
+  document.getElementById('modalImgPrev').onclick = () => {
+    if (shouldIgnoreDuplicateNav(lastWishDetailNavAt)) return;
+    lastWishDetailNavAt = performance.now();
+    const entries = appState.productDetailMedia || [];
+    if (entries.length <= 1) return;
+    appState.productDetailMediaIndex = (Number(appState.productDetailMediaIndex || 0) - 1 + entries.length) % entries.length;
+    updateWishModalImg();
+  };
+  document.getElementById('modalImgNext').onclick = () => {
+    if (shouldIgnoreDuplicateNav(lastWishDetailNavAt)) return;
+    lastWishDetailNavAt = performance.now();
+    const entries = appState.productDetailMedia || [];
+    if (entries.length <= 1) return;
+    appState.productDetailMediaIndex = (Number(appState.productDetailMediaIndex || 0) + 1) % entries.length;
+    updateWishModalImg();
+  };
   updateWishModalImg();
+  document.getElementById('modalOverlay')?.classList.add('product-detail-overlay', 'wishlist-detail-overlay');
+  document.querySelector('#modalOverlay .modal-box')?.classList.add('product-detail-modal', 'wishlist-detail-modal');
+  document.querySelector('#modalOverlay .modal-body')?.classList.add('product-detail-info', 'wishlist-detail-info');
+  document.getElementById('modalImg')?.parentElement?.classList.add('product-detail-media', 'wishlist-detail-media');
+  document.getElementById('modalName')?.classList.add('product-detail-title');
+  document.getElementById('modalRows')?.classList.add('product-detail-meta-grid');
   document.getElementById('modalName').textContent = w.name || '—';
   document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">${t('modal.priority')}</span><span style="color:${PRIORITY_COLOR[w.priority]}">${priorityLabel(w.priority)}</span></div>${w.store ? `<div class="modal-row"><span class="modal-label">${t('modal.store')}</span><span>${H(w.store)}</span></div>` : ''}${w.manufacturer ? `<div class="modal-row"><span class="modal-label">${t('modal.manufacturer')}</span><span>${H(w.manufacturer)}</span></div>` : ''}${w.priceOriginal ? `<div class="modal-row"><span class="modal-label">${t('modal.price')}</span><span>${w.priceOriginal} ${w.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div>` : ''}${renderProductMetaRows(w)}${w.tags?.length ? `<div class="modal-row"><span class="modal-label">${t('modal.tags')}</span><span class="tags">${w.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${w.notes ? `<div class="modal-row"><span class="modal-label">${t('modal.notes')}</span><span>${H(w.notes)}</span></div>` : ''}${w.shopUrl ? `<div class="modal-row"><span class="modal-label">${t('modal.productPage')}</span><a href="${H(w.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">${t('common.openStore')}</a></div>` : ''}`;
   document.getElementById('modalMove').style.display = 'flex';

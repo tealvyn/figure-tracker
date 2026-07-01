@@ -24,6 +24,11 @@ const renderQueue = new Map();
 let renderScheduled = false;
 const mediaLookup = new Map();
 const STANDALONE_TABS = new Set(['gallery', 'calendar', 'analytics', 'shelf', 'settings']);
+let gallerySliderTimer = null;
+let gallerySliderObserver = null;
+const visibleGallerySliders = new Set();
+let lastProductDetailNavAt = 0;
+let lastLightboxNavAt = 0;
 
 function isMobileViewport() {
   return window.matchMedia('(max-width: 768px)').matches;
@@ -32,6 +37,11 @@ function isMobileViewport() {
 function isDisplayed(id) {
   const el = document.getElementById(id);
   return Boolean(el && el.style.display !== 'none' && !el.hidden);
+}
+
+function shouldIgnoreDuplicateNav(lastAt, gap = 140) {
+  const now = performance.now();
+  return Boolean(lastAt) && now - lastAt < gap;
 }
 
 function pushUiHistory(kind) {
@@ -1418,7 +1428,113 @@ export function setGalleryShowHidden(value) {
   scheduleRender('gallery', renderGallery);
 }
 
+export function cleanupGalleryAutoSlider() {
+  if (gallerySliderTimer) {
+    clearInterval(gallerySliderTimer);
+    gallerySliderTimer = null;
+  }
+  if (gallerySliderObserver) {
+    gallerySliderObserver.disconnect();
+    gallerySliderObserver = null;
+  }
+  visibleGallerySliders.clear();
+}
+
+function setGalleryCardSlide(card, next) {
+  const slides = [...card.querySelectorAll('.gallery-slide')];
+  if (slides.length <= 1) return;
+  const index = ((next % slides.length) + slides.length) % slides.length;
+  slides.forEach((slide, idx) => {
+    const active = idx === index;
+    slide.classList.toggle('is-active', active);
+    if (!active) slide.querySelectorAll('video').forEach(video => video.pause?.());
+  });
+  card.dataset.currentIndex = String(index);
+  const count = card.querySelector('.gallery-card-count');
+  if (count) count.textContent = `${index + 1}/${slides.length}`;
+  card.querySelectorAll('.gallery-dot').forEach((dot, idx) => dot.classList.toggle('active', idx === index));
+}
+
+function isGallerySlideReady(slide) {
+  const media = slide?.querySelector('img, video');
+  if (!media) return false;
+  if (media instanceof HTMLImageElement) return Boolean(media.complete && media.naturalWidth);
+  if (media instanceof HTMLVideoElement) return media.readyState >= 1;
+  return true;
+}
+
+function advanceGalleryCardSlide(card) {
+  if (!card || card.matches(':hover') || card.matches(':focus-within')) return;
+  const slides = [...card.querySelectorAll('.gallery-slide')];
+  if (slides.length <= 1) return;
+  const activeVideo = card.querySelector('.gallery-slide.is-active video');
+  if (activeVideo && !activeVideo.paused && !activeVideo.dataset.gifLike) return;
+  const current = Math.max(0, Number(card.dataset.currentIndex || 0));
+  const next = (current + 1) % slides.length;
+  if (!isGallerySlideReady(slides[next])) return;
+  setGalleryCardSlide(card, next);
+}
+
+function lockGalleryCardMediaRatio(card) {
+  if (!card || card.dataset.mediaRatioLocked === 'true') return;
+  const mediaBox = card.querySelector('.gallery-card-media-slider, .gallery-card-media, .gallery-video-wrap');
+  const firstMedia = mediaBox?.querySelector('img, video');
+  if (!mediaBox || !firstMedia) return;
+  const apply = () => {
+    let width = 4;
+    let height = 5;
+    if (firstMedia instanceof HTMLImageElement && firstMedia.naturalWidth && firstMedia.naturalHeight) {
+      width = firstMedia.naturalWidth;
+      height = firstMedia.naturalHeight;
+    } else if (firstMedia instanceof HTMLVideoElement && firstMedia.videoWidth && firstMedia.videoHeight) {
+      width = firstMedia.videoWidth;
+      height = firstMedia.videoHeight;
+    }
+    const isWide = width > height * 1.25;
+    const isSquare = Math.abs(width - height) / Math.max(width, height) < 0.14;
+    card.classList.toggle('gallery-card-wide', isWide);
+    card.classList.toggle('gallery-card-square', !isWide && isSquare);
+    card.classList.toggle('gallery-card-tall', !isWide && !isSquare);
+    card.style.setProperty('--gallery-card-ratio', isWide ? '16 / 10' : isSquare ? '1 / 1' : '4 / 5');
+    card.dataset.mediaRatioLocked = 'true';
+  };
+  if ((firstMedia instanceof HTMLImageElement && firstMedia.complete) || firstMedia.readyState >= 1) {
+    apply();
+  } else {
+    firstMedia.addEventListener('load', apply, { once: true });
+    firstMedia.addEventListener('loadedmetadata', apply, { once: true });
+  }
+}
+
+function initGalleryAutoSlider() {
+  cleanupGalleryAutoSlider();
+  const cards = [...document.querySelectorAll('[data-gallery-slider="true"]')];
+  if (!cards.length) return;
+  cards.forEach(lockGalleryCardMediaRatio);
+  gallerySliderObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) visibleGallerySliders.add(entry.target);
+      else visibleGallerySliders.delete(entry.target);
+    });
+  }, { threshold: 0.35 });
+  cards.forEach(card => gallerySliderObserver.observe(card));
+  const delay = isMobileViewport() ? 7000 : 5500;
+  gallerySliderTimer = window.setInterval(() => {
+    visibleGallerySliders.forEach(card => advanceGalleryCardSlide(card));
+  }, delay);
+}
+
+export function openGalleryCardLightbox(button, ownerType, ownerId) {
+  const card = button?.closest?.('.gallery-card');
+  const index = Math.max(0, Number(card?.dataset.currentIndex || 0));
+  const slide = card?.querySelector(`.gallery-slide[data-slide-index="${index}"]`) || card?.querySelector('.gallery-slide.is-active');
+  const url = slide?.dataset.mediaUrl || '';
+  if (!url) return;
+  openItemLightbox(ownerType, ownerId, url, index, slide.querySelector('video'));
+}
+
 export function renderGallery() {
+  cleanupGalleryAutoSlider();
   const sort = document.getElementById('gallerySort')?.value || 'newest';
   const makerF = document.getElementById('galleryMaker')?.value || '';
   const showHiddenEl = document.getElementById('galleryShowHidden');
@@ -1461,63 +1577,48 @@ if (!items.length) {
   return;
 }
 
-const totalMediaCount = items.reduce((sum, item) => sum + Math.max(1, mediaEntriesOf(item).length), 0);
 const visibleCount = appState.galleryVisibleCount || GALLERY_PAGE_SIZE;
-let renderedMediaCount = 0;
+const visibleItems = items.slice(0, visibleCount);
 
-grid.innerHTML = items.map((item, idx) => {
-  if (renderedMediaCount >= visibleCount) return '';
+grid.innerHTML = visibleItems.map((item, idx) => {
   const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
   const imgs = mediaEntriesOf(item);
-
-  if (imgs.length === 0) {
-    renderedMediaCount += 1;
-    return `<div class="gallery-card animate-in" style="animation-delay:${idx * 20}ms; position: relative; aspect-ratio: 1;" onclick="if(isCardOpenBlocked(event))return;openModal('${H(item.id)}')">
-      <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:40px; opacity:0.3; background:#111;">📦</div>
-      <div class="gallery-overlay">
-        <div class="gallery-name">${H(item.name)}</div>
-        ${priceEur ? `<div class="gallery-price">€${priceEur.toFixed(2)}</div>` : ''}
-      </div>
-    </div>`;
-  }
-
-  const visibleImgs = imgs.slice(0, Math.max(0, visibleCount - renderedMediaCount));
-  renderedMediaCount += visibleImgs.length;
-
-  return visibleImgs.map((img, imgIdx) => {
-    const kind = img.kind;
-    const mediaUrl = img.url;
-    const mediaTag = renderMediaTag(img.media, 'gallery-media', item.name)
-      .replace(/class="([^"]*gallery-media[^"]*)"/, `class="$1" data-media-url="${H(mediaUrl)}"`);
-
-    const mediaHtml = kind === 'animation'
-      ? `<div class="gallery-video-wrap" data-no-card-open="true">
-          ${mediaTag}
-          <button class="icon-action-btn media-open-btn" type="button" title="${t('common.open')}" onclick="event.stopPropagation(); openItemLightbox('collection', '${H(item.id)}', '${H(mediaUrl)}', ${imgIdx}, this.closest('.gallery-video-wrap')?.querySelector('video'))">⛶</button>
-        </div>`
-      : kind === 'video'
-        ? `<div class="gallery-video-wrap" data-no-card-open="true">
-            ${mediaTag}
-            <button class="icon-action-btn media-open-btn" type="button" title="${t('common.open')}" onclick="event.stopPropagation(); openItemLightbox('collection', '${H(item.id)}', '${H(mediaUrl)}', ${imgIdx}, this.closest('.gallery-video-wrap')?.querySelector('video'))">⛶</button>
-          </div>`
-        : `<img class="gallery-media zoomable" data-media-url="${H(mediaUrl)}" src="${H(mediaUrl)}" loading="lazy" alt="${H(item.name)}" data-provider="${H(img.media?.provider || '')}" data-file-id="${H(img.media?.fileId || '')}" data-media-type="${H(img.media?.mediaType || '')}" onerror="handleMediaLoadError(this)" onclick="event.stopPropagation(); openItemLightbox('collection', '${H(item.id)}', '${H(mediaUrl)}', ${imgIdx})">`;
-
-    return `<div class="gallery-card animate-in" style="animation-delay:${(idx + imgIdx) * 20}ms; position: relative; align-self: start;" onclick="if(isCardOpenBlocked(event))return;openModal('${H(item.id)}')">
-      ${mediaHtml}
-      <div class="gallery-overlay">
-        <div class="gallery-name">${H(item.name)} ${imgs.length > 1 ? `<span style="font-size:11px;opacity:0.7">(${imgIdx + 1}/${imgs.length})</span>` : ''}</div>
-        ${priceEur && imgIdx === 0 ? `<div class="gallery-price">€${priceEur.toFixed(2)}</div>` : ''}
-      </div>
-    </div>`;
+  const slides = imgs.map((entry, mediaIdx) => {
+    const mediaTag = renderMediaTag(entry.media, 'gallery-media', item.name)
+      .replace(/class="([^"]*gallery-media[^"]*)"/, `class="$1" data-media-url="${H(entry.url)}"`)
+      .replace('<video ', entry.kind === 'animation' ? '<video data-gif-like="true" ' : '<video ');
+    return `<div class="gallery-slide ${mediaIdx === 0 ? 'is-active' : ''}" data-slide-index="${mediaIdx}" data-media-url="${H(entry.url)}">${mediaTag}</div>`;
   }).join('');
+  const mediaHtml = imgs.length
+    ? `<div class="gallery-card-media ${imgs.some(entry => entry.kind === 'video' || entry.kind === 'animation') ? 'has-video' : ''}">
+        <div class="gallery-card-media-slider">${slides}</div>
+        <button class="icon-action-btn media-open-btn" type="button" title="${t('common.open')}" onclick="event.stopPropagation(); openGalleryCardLightbox(this, 'collection', '${H(item.id)}')">⛶</button>
+        ${imgs.length > 1 ? `<span class="gallery-card-count">1/${imgs.length}</span>` : ''}
+      </div>`
+    : `<div class="gallery-card-media gallery-card-placeholder"><div>📦</div></div>`;
+  const meta = [
+    item.store,
+    item.status,
+    priceEur ? `€${priceEur.toFixed(2)}` : ''
+  ].filter(Boolean).map(H).join(' · ');
+
+  return `<div class="gallery-card animate-in" ${imgs.length > 1 ? `data-gallery-slider="true" data-item-id="${H(item.id)}" data-current-index="0"` : ''} style="animation-delay:${idx * 20}ms;" onclick="if(isCardOpenBlocked(event))return;openProductDetail('collection','${H(item.id)}')">
+      ${mediaHtml}
+      <div class="gallery-card-body">
+        <div class="gallery-card-title">${H(item.name)}</div>
+        ${meta ? `<div class="gallery-card-meta">${meta}</div>` : ''}
+        ${imgs.length > 1 ? `<div class="gallery-dots">${imgs.map((_, dotIdx) => `<span class="gallery-dot ${dotIdx === 0 ? 'active' : ''}"></span>`).join('')}</div>` : ''}
+      </div>
+    </div>`;
 }).join('');
 
-if (renderedMediaCount < totalMediaCount) {
-  grid.innerHTML += `<div style="break-inside:avoid;display:flex;justify-content:center;padding:18px 0 30px;">
-    <button type="button" class="btn btn-primary btn-sm" onclick="showMoreGallery()">${t('gallery.showMore', { count: Math.min(GALLERY_PAGE_SIZE, totalMediaCount - renderedMediaCount), total: totalMediaCount - renderedMediaCount })}</button>
+if (visibleItems.length < items.length) {
+  grid.innerHTML += `<div class="gallery-more">
+    <button type="button" class="btn btn-primary btn-sm" onclick="showMoreGallery()">${t('gallery.showMore', { count: Math.min(GALLERY_PAGE_SIZE, items.length - visibleItems.length), total: items.length - visibleItems.length })}</button>
   </div>`;
 }
 ensurePreviewVideoControls(grid);
+requestAnimationFrame(initGalleryAutoSlider);
 }
 
 export function showMoreGallery() {
@@ -1557,7 +1658,7 @@ export function updateBanner(advance = false) {
   if (typeof appState.currentTab !== 'undefined' && appState.currentTab !== 'collection') { banner.style.display = 'none'; return; }
   const data = state.bannerData || {}; const notices = [];
   if (data.unpaidItems?.length) notices.push({ type: 'unpaid', text: `💰 Не оплачено ${data.unpaidItems.length} шт. на €${data.unpaidTotal.toFixed(2)}` });
-  if (data.upcoming?.length) notices.push({ type: 'upcoming', text: `🔔 Скоро выходят: ${data.upcoming.slice(0, 3).map(i => `${H(i.name)} (${H(i.releaseDate)})`).join(' · ')}` });
+  if (data.upcoming?.length) notices.push({ type: 'upcoming', text: `🔔 Скоро выходят: ${data.upcoming.slice(0, 3).map(i => `${H(i.name)} (${H(i.releaseDate)})`).join(' • ')}` });
   if (data.inTransit?.length) notices.push({ type: 'transit', text: `🚚 В пути: ${data.inTransit.length} фигурок` });
   if (data.stats) notices.push({ type: 'stats', text: `📦 Коллекция: ${data.stats.totalItems} фигурок · дома ${data.stats.received} · в вишлисте ${data.stats.wishlist}` });
   notices.push({ type: 'fact', text: getFactByTime() });
@@ -1570,7 +1671,22 @@ export function updateBanner(advance = false) {
   const BANNER_THEMES = { unpaid: { bg: 'rgba(248,113,113,0.08)', border: 'rgba(248,113,113,0.2)', color: 'var(--red)' }, upcoming: { bg: 'rgba(251,191,36,0.08)', border: 'rgba(251,191,36,0.2)', color: 'var(--yellow)' }, transit: { bg: 'rgba(74,222,128,0.08)', border: 'rgba(74,222,128,0.2)', color: 'var(--green)' }, stats: { bg: 'rgba(103,232,249,0.08)', border: 'rgba(103,232,249,0.2)', color: 'var(--accent)' }, fact: { bg: 'rgba(138,147,168,0.08)', border: 'rgba(138,147,168,0.2)', color: 'var(--muted)' } };
   const theme = BANNER_THEMES[currentNotice.type] || BANNER_THEMES.fact;
   banner.style.background = theme.bg; banner.style.borderBottomColor = theme.border; banner.style.color = theme.color;
-  banner.style.display = 'flex'; banner.innerHTML = currentNotice.text;
+  banner.style.display = 'flex';
+  banner.innerHTML = '<div class="release-ticker"><div class="release-ticker-track"><span class="release-ticker-text"></span></div></div>';
+  banner.querySelector('.release-ticker-text').innerHTML = currentNotice.text;
+  requestAnimationFrame(updateReleaseTickerState);
+}
+
+function updateReleaseTickerState() {
+  const ticker = document.querySelector('.release-ticker');
+  const track = document.querySelector('.release-ticker-track');
+  if (!ticker || !track) return;
+  const shouldScroll = track.scrollWidth > ticker.clientWidth + 8;
+  ticker.classList.toggle('is-marquee', shouldScroll);
+  if (shouldScroll) {
+    const duration = Math.max(16, Math.min(45, Math.round(track.scrollWidth / 35)));
+    ticker.style.setProperty('--release-ticker-duration', `${duration}s`);
+  }
 }
 
 export function getFactByTime() {
@@ -1680,11 +1796,7 @@ function getLightboxItems(src, context) {
     const owner = getLightboxOwner('', context);
     if (owner) return mediaEntriesOf(owner);
 
-    if (context === 'gallery') {
-      return [...document.querySelectorAll('#galleryGrid [data-media-url]')]
-        .map(el => normalizeLightboxEntry(el.dataset.mediaUrl))
-        .filter(Boolean);
-    }
+    if (context === 'gallery') return [normalizeLightboxEntry(src)].filter(Boolean);
   }
 
   return [normalizeLightboxEntry(src)].filter(Boolean);
@@ -1869,6 +1981,98 @@ function setLightboxMedia(media, alt = '', options = {}) {
   pauseAllVideosExcept(newEl.tagName === 'VIDEO' ? newEl : null);
 }
 
+function productDetailRow(label, value, isHtml = false) {
+  if (value == null || value === '') return '';
+  return `<div class="modal-row product-detail-row"><span class="modal-label">${H(label)}</span>${isHtml ? `<span>${value}</span>` : `<span>${H(value)}</span>`}</div>`;
+}
+
+function productDetailLink(label, url, text = '') {
+  if (!url) return '';
+  const safeUrl = H(url);
+  return productDetailRow(label, `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${H(text || url)}</a>`, true);
+}
+
+function buildCollectionDetailRows(item, priceEur) {
+  const shipping = Number(item.shippingEur || 0);
+  const deposit = Number(item.deposit || 0);
+  const remaining = Math.max(0, priceEur + shipping - deposit);
+  const sku = item.sku || item.code || '';
+  return [
+    productDetailRow('Заказ', item.orderNumber ? `#${item.orderNumber}` : ''),
+    productDetailRow('Посылка', item.orderName),
+    productDetailRow('Магазин', item.store),
+    productDetailRow('Регион', item.region),
+    productDetailRow('Производитель', item.manufacturer),
+    productDetailRow('Дата выхода', item.releaseDate),
+    productDetailRow('Статус', item.status),
+    productDetailRow('Цена', item.priceOriginal ? `${item.priceOriginal} ${item.currency || ''} · €${priceEur.toFixed(2)}` : ''),
+    productDetailRow('Доставка', shipping ? `€${shipping.toFixed(2)}` : ''),
+    productDetailRow('Предоплата', deposit ? `€${deposit.toFixed(2)}` : ''),
+    productDetailRow('Остаток', `€${remaining.toFixed(2)}`),
+    productDetailRow('Трек-номер', item.tracking),
+    productDetailRow('Масштаб / тип', item.scale),
+    productDetailRow('Метод доставки', item.shipMethod),
+    productDetailRow('Дата заказа', item.orderDate),
+    productDetailRow('Дата отправки', item.shipDate),
+    productDetailRow('JAN / EAN', item.jan),
+    productDetailRow('SKU / код', sku),
+    productDetailRow('Старт предзаказа', item.preorderStart),
+    productDetailRow('Окончание предзаказа', item.preorderEnd),
+    productDetailRow('Статус релиза', item.releaseStatus && item.releaseStatus !== 'unknown' ? item.releaseStatus : ''),
+    productDetailRow('Источник импорта', item.source),
+    productDetailLink('Ссылка-источник', item.sourceUrl),
+    productDetailLink('Страница товара', item.shopUrl, t('common.openStore')),
+    item.tags?.length ? productDetailRow('Теги', `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true) : ''
+  ].filter(Boolean).join('');
+}
+
+function renderProductDetailThumbs(items, activeIndex, ownerId, onSelect, ownerType = 'collection') {
+  const mediaFrame = document.getElementById('modalImg')?.parentElement;
+  if (!mediaFrame) return;
+  mediaFrame.classList.add('product-detail-media');
+  let lightboxBtn = document.getElementById('productDetailLightboxBtn');
+  if (!lightboxBtn) {
+    lightboxBtn = document.createElement('button');
+    lightboxBtn.id = 'productDetailLightboxBtn';
+    lightboxBtn.type = 'button';
+    lightboxBtn.className = 'icon-action-btn media-open-btn product-detail-lightbox-btn';
+    lightboxBtn.textContent = '⛶';
+    mediaFrame.appendChild(lightboxBtn);
+  }
+  lightboxBtn.onclick = event => {
+    event.stopPropagation();
+    const entries = appState.productDetailMedia || items;
+    const index = Math.max(0, Math.min(entries.length - 1, Number(appState.productDetailMediaIndex ?? activeIndex) || 0));
+    const entry = entries[index];
+    const sourceVideo = mediaFrame.querySelector('video');
+    const startTime = Number(sourceVideo?.currentTime || 0);
+    const autoplay = Boolean(sourceVideo && !sourceVideo.paused && !sourceVideo.ended);
+    if (sourceVideo) sourceVideo.pause();
+    if (entry?.url) openLightbox(entry.url, { items: entries, index, ownerId, ownerType, startTime, autoplay });
+  };
+  lightboxBtn.style.display = items.length ? 'inline-flex' : 'none';
+  let thumbs = document.getElementById('productDetailThumbs');
+  if (!thumbs) {
+    thumbs = document.createElement('div');
+    thumbs.id = 'productDetailThumbs';
+    thumbs.className = 'product-detail-thumbs';
+    mediaFrame.insertAdjacentElement('afterend', thumbs);
+  }
+  thumbs.innerHTML = items.length > 1 ? items.map((entry, idx) => (
+    `<button type="button" class="${idx === activeIndex ? 'active' : ''}" data-media-index="${idx}">
+      ${entry.kind === 'video' || entry.kind === 'animation' ? '<span>▶</span>' : `<img src="${H(entry.url)}" alt="">`}
+    </button>`
+  )).join('') : '';
+  thumbs.querySelectorAll('[data-media-index]').forEach(button => {
+    button.onclick = () => onSelect(Number(button.dataset.mediaIndex || 0));
+  });
+}
+
+export function openProductDetail(type, id) {
+  if (type === 'wishlist') return openWishModal(id);
+  return openModal(id);
+}
+
 export function openModal(id) {
   pauseAllVideosExcept();
   document.getElementById('modalMove').style.display = 'none';
@@ -1876,32 +2080,54 @@ export function openModal(id) {
   const item = normalizeProductMeta(rawItem);
   appState.modalItemId = id;
   const priceEur = toEur(item.priceOriginal || 0, item.currency || 'EUR');
+  document.getElementById('modalOverlay')?.classList.add('product-detail-overlay');
+  document.querySelector('#modalOverlay .modal-box')?.classList.add('product-detail-modal');
+  document.querySelector('#modalOverlay .modal-body')?.classList.add('product-detail-info');
+  document.getElementById('modalName')?.classList.add('product-detail-title');
   document.getElementById('modalName').textContent = item.name || '—';
-  document.getElementById('modalRows').innerHTML = `<div class="modal-row"><span class="modal-label">${t('modal.order')}</span><span>#${H(item.orderNumber)} — ${H(item.orderName || '')}</span></div><div class="modal-row"><span class="modal-label">${t('modal.store')}</span><span>${H(item.store || '—')}</span></div><div class="modal-row"><span class="modal-label">${t('modal.region')}</span><span>${H(item.region || '—')}</span></div><div class="modal-row"><span class="modal-label">${t('modal.manufacturer')}</span><span>${H(item.manufacturer || '—')}</span></div><div class="modal-row"><span class="modal-label">${t('modal.price')}</span><span>${item.priceOriginal} ${item.currency} → <strong style="color:var(--green)">€${priceEur}</strong></span></div><div class="modal-row"><span class="modal-label">${t('modal.shipping')}</span><span>€${Number(item.shippingEur || 0).toFixed(2)}</span></div><div class="modal-row"><span class="modal-label">${t('modal.deposit')}</span><span>€${Number(item.deposit || 0).toFixed(2)}</span></div>${renderProductMetaRows(item)}${item.tags?.length ? `<div class="modal-row"><span class="modal-label">${t('modal.tags')}</span><span class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</span></div>` : ''}${item.shopUrl ? `<div class="modal-row"><span class="modal-label">${t('modal.productPage')}</span><a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px;">${t('common.openStore')}</a></div>` : ''}
-  ${(item.rateAtSave && item.currency !== 'EUR') ? `<div class="modal-row"><span class="modal-label">Курс при добавлении</span><span>€${item.rateAtSave.toFixed(item.currency === 'JPY' ? 5 : 4)} за 1 ${item.currency} <span style="color:var(--muted)">(${item.rateAtSaveDate || '—'})</span></span></div><div class="modal-row"><span class="modal-label">Курс сейчас</span><span>€${(state.rates[item.currency] || 1).toFixed(item.currency === 'JPY' ? 5 : 4)} за 1 ${item.currency} ${(() => { const old = item.rateAtSave || 1; const now = state.rates[item.currency] || 1; const diff = ((now - old) / old * 100).toFixed(1); const color = now > old ? 'var(--green)' : 'var(--red)'; const arrow = now > old ? '↑' : '↓'; return now === old ? '<span style="color:var(--muted)">без изменений</span>' : `<span style="color:${color}">${arrow} ${Math.abs(diff)}%</span>`; })()}</span></div>` : ''}
-  <div class="modal-row"><span class="modal-label">${t('modal.status')}</span><span class="badge ${badgeClass(item.status)}">${H(item.status || '—')}</span></div>`;
+  document.getElementById('modalRows').classList.add('product-detail-meta-grid');
+  document.getElementById('modalRows').innerHTML = buildCollectionDetailRows(item, priceEur);
 
   const imgs = mediaEntriesOf(item);
+  appState.productDetailMedia = imgs;
+  appState.productDetailMediaIndex = 0;
   window.currentModalImages = imgs.map(img => img.url);
   window.currentModalMedia = imgs;
-  let imgIdx = 0;
   function updateModalImg() {
-    setModalMedia(imgs[imgIdx]?.media || '', item?.name || '', {
-      items: imgs,
+    const entries = appState.productDetailMedia || imgs;
+    const imgIdx = Math.max(0, Math.min(entries.length - 1, Number(appState.productDetailMediaIndex) || 0));
+    appState.productDetailMediaIndex = imgIdx;
+    setModalMedia(entries[imgIdx]?.media || '', item?.name || '', {
+      items: entries,
       index: imgIdx,
       ownerId: id,
       ownerType: 'collection'
     });
-    document.getElementById('modalImgCounter').textContent = imgs.length > 1 ? `${imgIdx + 1} / ${imgs.length}` : '';
-    document.getElementById('modalImgPrev').style.display = imgs.length > 1 ? 'flex' : 'none'; document.getElementById('modalImgNext').style.display = imgs.length > 1 ? 'flex' : 'none';
+    document.getElementById('modalImgCounter').textContent = entries.length > 1 ? `${imgIdx + 1} / ${entries.length}` : '';
+    document.getElementById('modalImgPrev').style.display = entries.length > 1 ? 'flex' : 'none'; document.getElementById('modalImgNext').style.display = entries.length > 1 ? 'flex' : 'none';
+    renderProductDetailThumbs(entries, imgIdx, id, nextIdx => { appState.productDetailMediaIndex = nextIdx; updateModalImg(); });
   }
 
   const receiveBtn = document.getElementById('modalReceive');
   if (item.status === 'Получено') { receiveBtn.style.display = 'none'; } else {
     receiveBtn.style.display = 'flex'; receiveBtn.onclick = () => { state.items.find(i => i.id === id).status = 'Получено'; persist(); render(); renderShelf(); toast(t('toast.itemReceived')); closeModal(); };
   }
-  document.getElementById('modalImgPrev').onclick = () => { imgIdx = (imgIdx - 1 + imgs.length) % imgs.length; updateModalImg(); };
-  document.getElementById('modalImgNext').onclick = () => { imgIdx = (imgIdx + 1) % imgs.length; updateModalImg(); };
+  document.getElementById('modalImgPrev').onclick = () => {
+    if (shouldIgnoreDuplicateNav(lastProductDetailNavAt)) return;
+    lastProductDetailNavAt = performance.now();
+    const entries = appState.productDetailMedia || [];
+    if (entries.length <= 1) return;
+    appState.productDetailMediaIndex = (Number(appState.productDetailMediaIndex || 0) - 1 + entries.length) % entries.length;
+    updateModalImg();
+  };
+  document.getElementById('modalImgNext').onclick = () => {
+    if (shouldIgnoreDuplicateNav(lastProductDetailNavAt)) return;
+    lastProductDetailNavAt = performance.now();
+    const entries = appState.productDetailMedia || [];
+    if (entries.length <= 1) return;
+    appState.productDetailMediaIndex = (Number(appState.productDetailMediaIndex || 0) + 1) % entries.length;
+    updateModalImg();
+  };
   updateModalImg();
   document.getElementById('modalEdit').onclick = () => { closeModal(); editItem(id); };
   document.getElementById('modalDelete').onclick = () => { if (confirm(t('confirm.deleteGeneric'))) { closeModal(); deleteItem(id); } };
@@ -1912,7 +2138,18 @@ export function openModal(id) {
 export function closeModal() {
   stopMedia(document.getElementById('modalOverlay'), { resetSrc: true });
   document.getElementById('modalOverlay').style.display = 'none'; appState.modalItemId = null;
+  document.getElementById('modalOverlay')?.classList.remove('product-detail-overlay');
+  document.getElementById('modalOverlay')?.classList.remove('wishlist-detail-overlay');
+  document.querySelector('#modalOverlay .modal-box')?.classList.remove('product-detail-modal', 'wishlist-detail-modal');
+  document.querySelector('#modalOverlay .modal-body')?.classList.remove('product-detail-info', 'wishlist-detail-info');
+  document.getElementById('modalName')?.classList.remove('product-detail-title');
+  document.getElementById('modalRows')?.classList.remove('product-detail-meta-grid');
+  document.getElementById('modalImg')?.parentElement?.classList.remove('product-detail-media', 'wishlist-detail-media');
+  document.getElementById('productDetailLightboxBtn')?.remove();
+  document.getElementById('productDetailThumbs')?.remove();
   window.currentModalMedia = [];
+  appState.productDetailMedia = [];
+  appState.productDetailMediaIndex = 0;
   if (appState.historyLayer === 'modal') appState.historyLayer = null;
   document.getElementById('modalImgPrev').onclick = null; document.getElementById('modalImgNext').onclick = null; document.getElementById('modalImgCounter').textContent = '';
   document.getElementById('modalImgPrev').style.display = 'none'; document.getElementById('modalImgNext').style.display = 'none';
@@ -2020,6 +2257,8 @@ export function showLightboxPhoto() {
 }
 
 export function lightboxNav(dir) {
+  if (shouldIgnoreDuplicateNav(lastLightboxNavAt)) return;
+  lastLightboxNavAt = performance.now();
   const items = appState.lightboxItems || [];
   if (items.length <= 1) return;
 
@@ -2046,8 +2285,18 @@ export function closeLightbox() {
 export function initLightboxTouch() {
   const overlay = document.getElementById('lightboxOverlay'); if (!overlay || appState.lightboxTouchInitialized) return;
   appState.lightboxTouchInitialized = true;
-  overlay.addEventListener('touchstart', e => { if (!e.touches.length) return; appState.lightboxTouchStartX = e.touches[0].clientX; appState.lightboxTouchStartY = e.touches[0].clientY; }, { passive: true });
+  overlay.addEventListener('touchstart', e => {
+    if (e.target?.closest?.('.lightbox-arrow, .lightbox-close, .lightbox-media, #lightboxImg, video, button')) {
+      appState.lightboxTouchStartX = appState.lightboxTouchStartY = null;
+      return;
+    }
+    if (!e.touches.length) return; appState.lightboxTouchStartX = e.touches[0].clientX; appState.lightboxTouchStartY = e.touches[0].clientY;
+  }, { passive: true });
   overlay.addEventListener('touchend', e => {
+    if (e.target?.closest?.('.lightbox-arrow, .lightbox-close, .lightbox-media, #lightboxImg, video, button')) {
+      appState.lightboxTouchStartX = appState.lightboxTouchStartY = null;
+      return;
+    }
     if (appState.lightboxTouchStartX === null) return; if (!e.changedTouches.length) return;
     const dx = e.changedTouches[0].clientX - appState.lightboxTouchStartX; const dy = e.changedTouches[0].clientY - appState.lightboxTouchStartY;
     if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) { appState.lightboxTouchStartX = appState.lightboxTouchStartY = null; return; }
@@ -2267,6 +2516,7 @@ export function switchTab(tab = 'collection') {
   }
   if (tab === 'collection') appState.standaloneTabHistory = false;
   if (previousTab === 'gallery' && tab !== 'gallery') {
+    cleanupGalleryAutoSlider();
     stopMedia(document.getElementById('galleryPane'), { resetSrc: false });
   }
   stopMedia(document.getElementById('modalOverlay'), { resetSrc: true });
