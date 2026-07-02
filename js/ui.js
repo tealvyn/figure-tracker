@@ -29,6 +29,104 @@ let gallerySliderObserver = null;
 const visibleGallerySliders = new Set();
 let lastProductDetailNavAt = 0;
 let lastLightboxNavAt = 0;
+export const TAMPERMONKEY_SCRIPT_URL = 'https://tealvyn.github.io/figure-tracker/tampermonkey/figure-tracker-universal-importer.user.js';
+const TAMPERMONKEY_SCRIPT_RAW_URL = 'https://raw.githubusercontent.com/tealvyn/figure-tracker/main/tampermonkey/figure-tracker-universal-importer.user.js';
+const TAMPERMONKEY_SCRIPT_LOCAL_URL = 'tampermonkey/figure-tracker-universal-importer.user.js';
+const TAMPERMONKEY_SCRIPT_FALLBACK = `// ==UserScript==
+// @name         Figure Tracker Universal Importer
+// @namespace    figure-tracker-importer
+// @version      2.2.0
+// @description  Copy figure product data to Figure Tracker JSON format.
+// @match        https://*.amiami.com/*
+// @match        https://amiami.com/*
+// @match        https://*.1999.co.jp/*
+// @match        https://1999.co.jp/*
+// @match        https://*.mandarake.co.jp/*
+// @match        https://mandarake.co.jp/*
+// @match        https://*.solarisjapan.com/*
+// @match        https://solarisjapan.com/*
+// @match        https://*.goodsmile.com/*
+// @match        https://goodsmile.com/*
+// @match        https://*.goodsmile-europe.com/*
+// @match        https://goodsmile-europe.com/*
+// @match        https://*.orzgk.com/*
+// @match        https://orzgk.com/*
+// @grant        GM_setClipboard
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  const BUTTON_ID = 'figure-tracker-importer-button';
+
+  function textOf(node) {
+    return (node?.textContent || '').replace(/\\s+/g, ' ').trim();
+  }
+
+  function meta(selector) {
+    return document.querySelector(selector)?.content?.trim() || '';
+  }
+
+  function absUrl(value) {
+    if (!value) return '';
+    try { return new URL(value, location.href).href; } catch { return ''; }
+  }
+
+  function detectStore() {
+    const host = location.hostname.replace(/^www\\./, '').toLowerCase();
+    if (host.includes('amiami')) return 'AmiAmi';
+    if (host.includes('1999')) return 'Hobby Search';
+    if (host.includes('mandarake')) return 'Mandarake';
+    if (host.includes('solarisjapan')) return 'Solaris Japan';
+    if (host.includes('goodsmile-europe')) return 'Good Smile Europe';
+    if (host.includes('goodsmile')) return 'Good Smile Company';
+    if (host.includes('orzgk')) return 'OrzGK';
+    return host;
+  }
+
+  function pickImage() {
+    const fromMeta = meta('meta[property="og:image"], meta[name="twitter:image"]');
+    if (fromMeta) return absUrl(fromMeta);
+    const image = [...document.images].find(img => (img.currentSrc || img.src) && img.naturalWidth >= 240 && img.naturalHeight >= 240);
+    return absUrl(image?.currentSrc || image?.src || '');
+  }
+
+  function buildPayload() {
+    const imageUrl = pickImage();
+    const item = {
+      name: meta('meta[property="og:title"], meta[name="twitter:title"]') || textOf(document.querySelector('h1')) || document.title,
+      store: detectStore(),
+      imageUrl,
+      imageUrls: imageUrl ? [imageUrl] : [],
+      shopUrl: location.href,
+      source: detectStore(),
+      sourceUrl: location.href
+    };
+    return { app: 'FigureTracker', version: 2, source: 'tampermonkey', sourceName: detectStore(), sourceUrl: location.href, items: [item] };
+  }
+
+  async function copyFigureData() {
+    const code = JSON.stringify(buildPayload(), null, 2);
+    if (typeof GM_setClipboard === 'function') GM_setClipboard(code, 'text');
+    else await navigator.clipboard.writeText(code);
+    alert('Скопировано для Figure Tracker');
+  }
+
+  function addButton() {
+    if (document.getElementById(BUTTON_ID) || !document.body) return;
+    const button = document.createElement('button');
+    button.id = BUTTON_ID;
+    button.type = 'button';
+    button.textContent = '📋 В трекер';
+    button.style.cssText = 'position:fixed;right:16px;bottom:18px;z-index:2147483647;border:0;border-radius:999px;padding:11px 14px;background:#22c55e;color:#06130b;font:700 13px system-ui,sans-serif;box-shadow:0 12px 32px rgba(34,197,94,.35);cursor:pointer';
+    button.addEventListener('click', copyFigureData);
+    document.body.appendChild(button);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton, { once: true });
+  else addButton();
+})();
+`;
 
 function isMobileViewport() {
   return window.matchMedia('(max-width: 768px)').matches;
@@ -2572,6 +2670,51 @@ export function renderCalendar() {
 
 function waitForTampermonkeyForm(ms = 50) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+export function installTampermonkeyScript() {
+  window.open(TAMPERMONKEY_SCRIPT_URL, '_blank', 'noopener,noreferrer');
+}
+
+export async function getTampermonkeyScript() {
+  const urls = [TAMPERMONKEY_SCRIPT_LOCAL_URL, TAMPERMONKEY_SCRIPT_URL, TAMPERMONKEY_SCRIPT_RAW_URL];
+
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (response.ok) return await response.text();
+    } catch (err) {
+      console.warn('[Tampermonkey install] fetch failed:', url, err);
+    }
+  }
+
+  return TAMPERMONKEY_SCRIPT_FALLBACK;
+}
+
+export async function downloadTampermonkeyScript() {
+  const code = await getTampermonkeyScript();
+  const blob = new Blob([code], { type: 'application/javascript;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'figure-tracker-universal-importer.user.js';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(url);
+}
+
+export async function copyTampermonkeyScript() {
+  try {
+    const code = await getTampermonkeyScript();
+    await navigator.clipboard.writeText(code);
+    toast('Код userscript скопирован');
+  } catch (err) {
+    console.warn('[Tampermonkey install] copy failed:', err);
+    toast('Не удалось скопировать код userscript');
+  }
 }
 
 async function ensureTampermonkeyFormOpen(target = 'main') {

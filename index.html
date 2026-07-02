@@ -336,7 +336,7 @@
           <div
             style="border-top:1px solid var(--line);padding-top:10px;display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <div style="font-size:13px;font-weight:600;" data-i18n="settings.loadDrive">Загрузить с Google Drive</div>
+              <div style="font-size:13px;font-weight:600;" data-i18n="settings.loadDrive">Загрузить</div>
               <div style="font-size:11px;color:var(--muted);" data-i18n="settings.loadDriveHelp">Заменить локальные данные данными из Drive</div>
             </div>
             <button id="loadDriveBtn" class="btn btn-sm" onclick="loadFromDrive()">☁️ <span data-i18n="settings.loadDrive">Загрузить</span></button>
@@ -376,6 +376,18 @@
             <div style="margin-top:6px;font-size:11px;" data-i18n="settings.backupReminder">Делай бекапы регулярно!</div>
             <a class="settings-github-link" href="https://github.com/tealvyn/figure-tracker" target="_blank"
               rel="noopener noreferrer" data-i18n="settings.github">GitHub проекта ↗</a>
+          </div>
+        </div>
+        <div class="breakdown">
+          <div class="breakdown-title">Tampermonkey / Автозаполнение</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.7;">
+            <div>Скрипт добавляет кнопку 📋 В трекер на страницах магазинов и копирует данные фигурки в JSON для импорта.</div>
+            <div class="settings-tampermonkey-actions">
+              <button class="btn btn-sm" onclick="installTampermonkeyScript()">Установить скрипт</button>
+              <button class="btn btn-sm" onclick="downloadTampermonkeyScript()">Скачать .user.js</button>
+              <button class="btn btn-sm" onclick="copyTampermonkeyScript()">Скопировать код</button>
+            </div>
+            <div style="margin-top:6px;font-size:11px;">На телефоне лучше использовать установку по ссылке или скачать .user.js, потому что клавиатура может обрезать большой код.</div>
           </div>
         </div>
 
@@ -527,7 +539,7 @@
           <div class="form-label" data-i18n="form.image">Ссылка на картинку / Загрузить на Диск</div>
           <div class="input-with-button upload-input-group" style="display:flex; gap:8px;">
             <input id="fImg" placeholder="https://..." style="flex:1;" />
-            <button type="button" class="btn btn-sm" onclick="document.getElementById('fImgFile').click()">📤
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('fImgFile').click()">
               <span data-i18n="common.upload">Загрузить</span></button>
             <input type="file" id="fImgFile" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" multiple style="display:none;" />
           </div>
@@ -536,7 +548,7 @@
           <div class="form-label" data-i18n="form.productUrl">Ссылка на страницу товара</div>
           <div class="input-with-button fill-input-group" style="display:flex; gap:8px;">
             <input id="fShopUrl" placeholder="https://www.amiami.com/..." type="url" style="flex:1;" />
-            <button type="button" class="btn btn-sm" id="btnAutofillMain" onclick="grabFromTampermonkey('main')">🔍
+            <button type="button" class="btn btn-sm" id="btnAutofillMain" onclick="grabFromTampermonkey('main')">
               <span data-i18n="common.autofill">Заполнить</span></button>
           </div>
         </div>
@@ -741,7 +753,7 @@
           <div style="display:flex; gap:8px;">
             <input id="wShopUrl" placeholder="https://www.amiami.com/eng/detail/?gcode=..." type="url"
               style="flex:1;" />
-            <button type="button" class="btn btn-sm" id="btnAutofillWish" onclick="grabFromTampermonkey('wish')">🔍
+            <button type="button" class="btn btn-sm" id="btnAutofillWish" onclick="grabFromTampermonkey('wish')">
               <span data-i18n="common.autofill">Заполнить</span></button>
           </div>
         </div>

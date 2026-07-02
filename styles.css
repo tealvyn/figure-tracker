@@ -428,6 +428,17 @@ body {
   background: var(--panel-3);
 }
 
+.settings-tampermonkey-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.settings-tampermonkey-actions .btn {
+  max-width: 100%;
+}
+
 .chip {
   background: var(--panel-2);
   border: 1px solid var(--line);
