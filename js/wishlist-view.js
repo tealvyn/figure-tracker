@@ -238,6 +238,8 @@ export function saveWish() {
     notes: document.getElementById('wNotes').value.trim(),
     priority: document.getElementById('wPriority').value,
     tags: (document.getElementById('wTags')?.value || '').split(',').map(t => t.trim()).filter(Boolean),
+    comments: appState.editingWishId ? (existingWish?.comments || []) : [],
+    tasks: appState.editingWishId ? (existingWish?.tasks || []) : [],
     createdAt: appState.editingWishId ? (state.wishlist?.find(w => w.id === appState.editingWishId)?.createdAt || Date.now()) : Date.now()
   });
   if (!state.wishlist) state.wishlist = [];

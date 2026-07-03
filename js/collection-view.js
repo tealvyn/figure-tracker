@@ -87,6 +87,64 @@ export function renderReleaseRows(items, emptyText) {
   }).join('');
 }
 
+function taskDueValue(dueDate) {
+  if (!dueDate) return 99999999;
+  const normalized = String(dueDate);
+  if (/^\d{4}-\d{2}$/.test(normalized)) return Number(normalized.replace('-', '')) * 100;
+  const time = new Date(normalized).getTime();
+  return Number.isNaN(time) ? 99999999 : Number(normalized.replace(/\D/g, '').slice(0, 8));
+}
+
+function taskBucket(dueDate) {
+  if (!dueDate) return 3;
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const raw = String(dueDate);
+  const month = raw.slice(0, 7);
+  if (raw < currentMonth) return 0;
+  if (month === currentMonth) return 1;
+  return 2;
+}
+
+function taskDueLabel(dueDate) {
+  if (!dueDate) return 'Без срока';
+  if (/^\d{4}-\d{2}$/.test(dueDate)) {
+    const [year, month] = dueDate.split('-');
+    return `${month}.${year}`;
+  }
+  const date = new Date(dueDate);
+  return Number.isNaN(date.getTime()) ? dueDate : date.toLocaleDateString('ru');
+}
+
+function taskTypeLabel(type) {
+  return {
+    payment: 'Оплата',
+    shipping: 'Доставка',
+    release: 'Релиз',
+    check: 'Проверить',
+    other: 'Другое'
+  }[type] || 'Другое';
+}
+
+function collectEntityTasks() {
+  const collection = (state.items || []).flatMap(item => (item.tasks || []).filter(task => !task.done).map(task => ({ type: 'collection', item, task })));
+  const wishlist = (state.wishlist || []).flatMap(item => (item.tasks || []).filter(task => !task.done).map(task => ({ type: 'wishlist', item, task })));
+  return [...collection, ...wishlist].sort((a, b) => {
+    const bucket = taskBucket(a.task.dueDate) - taskBucket(b.task.dueDate);
+    if (bucket) return bucket;
+    return taskDueValue(a.task.dueDate) - taskDueValue(b.task.dueDate);
+  });
+}
+
+function renderDashboardTaskRows(tasks) {
+  if (!tasks.length) return '';
+  return tasks.slice(0, 8).map(({ type, item, task }) => `<button class="dashboard-row dashboard-task-row" onclick="openEntityDetail('${type}','${H(item.id)}')">
+    ${item.imageUrl ? `<img src="${H(item.imageUrl)}" alt="" loading="lazy" onerror="this.style.opacity='.1'">` : `<span class="dashboard-row-icon">!</span>`}
+    <span class="dashboard-row-main"><strong>${H(task.title || 'Задача')}</strong><small>${H(taskDueLabel(task.dueDate))} · ${H(item.name || '—')}</small></span>
+    <span class="dashboard-row-side"><span class="badge">${H(taskTypeLabel(task.type))}</span></span>
+  </button>`).join('');
+}
+
 export function renderCollectionStatusBar(statusCounts, totalOrders = 0) {
   return `<div class="status-filter-row">
     <span class="badge" style="cursor:pointer;background:var(--line);" onclick="appState.filterStatus=null;render()">Все: ${totalOrders}</span>
@@ -131,6 +189,8 @@ export function renderCollectionHome({ orders, allOrders, totals, statusCounts, 
   const actionOrders = allOrders
     .filter(order => ['Не оплачено', 'Депозит оплачен'].includes(orderStatus(order)))
     .sort((a, b) => calcOrder(b).remaining - calcOrder(a).remaining);
+  const entityTasks = collectEntityTasks();
+  const actionList = `${renderDashboardTaskRows(entityTasks)}${renderMiniOrderRows(actionOrders, 'Нет срочных оплат')}`;
   const releaseItems = state.items
     .filter(item => item.status !== 'Получено' && item.releaseDate)
     .sort((a, b) => releaseSortValue(a) - releaseSortValue(b));
@@ -146,8 +206,8 @@ export function renderCollectionHome({ orders, allOrders, totals, statusCounts, 
 
     <div class="dashboard-focus-grid">
       <section class="dashboard-panel">
-        <div class="dashboard-panel-head"><span>Нужно действие</span><small>${actionOrders.length ? `${actionOrders.length} заказов` : 'всё спокойно'}</small></div>
-        <div class="dashboard-list">${renderMiniOrderRows(actionOrders, 'Нет срочных оплат')}</div>
+        <div class="dashboard-panel-head"><span>Нужно действие</span><small>${entityTasks.length + actionOrders.length ? `${entityTasks.length + actionOrders.length} пунктов` : 'всё спокойно'}</small></div>
+        <div class="dashboard-list">${entityTasks.length || actionOrders.length ? actionList : '<div class="dashboard-empty">Нет срочных действий</div>'}</div>
       </section>
       <section class="dashboard-panel">
         <div class="dashboard-panel-head"><span>Ближайшие релизы</span><small>${releaseItems.length ? `${releaseItems.length} позиций` : 'нет дат'}</small></div>

@@ -5186,6 +5186,113 @@ video.modal-img {
   backdrop-filter: blur(10px);
 }
 
+.entity-notes-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.entity-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.entity-notes-head strong,
+.entity-tasks h4,
+.entity-comments h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.entity-notes-head span,
+.entity-note-empty,
+.entity-task-meta,
+.entity-comment-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.entity-tasks,
+.entity-comments,
+.entity-note-form,
+.entity-task,
+.entity-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.entity-task-templates,
+.entity-task-actions,
+.entity-comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.entity-note-form input,
+.entity-note-form select,
+.entity-note-form textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.entity-task,
+.entity-comment {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.entity-task.done {
+  opacity: .58;
+}
+
+.entity-task.done strong {
+  text-decoration: line-through;
+}
+
+.entity-task-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+  cursor: pointer;
+}
+
+.entity-task-check strong,
+.entity-task-check em,
+.entity-comment div:first-child {
+  overflow-wrap: anywhere;
+}
+
+.entity-task-check em {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.entity-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dashboard-task-row .badge {
+  white-space: nowrap;
+}
+
 @media (max-width: 1200px) {
   .gallery-grid { columns: 4 230px; }
 }
@@ -5346,6 +5453,16 @@ video.modal-img {
     z-index: 1;
     flex: 0 0 auto;
     margin-top: 0;
+  }
+
+  .entity-notes-panel {
+    padding-bottom: 8px;
+  }
+
+  .entity-task-templates .btn,
+  .entity-task-actions .btn,
+  .entity-comment-actions .btn {
+    flex: 1 1 auto;
   }
 
   .modal-body {

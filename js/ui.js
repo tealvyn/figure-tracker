@@ -1263,6 +1263,8 @@ export function saveItem() {
     createdAt: appState.editingId ? (existingItem?.createdAt || Date.now()) : Date.now(),
     hidden: appState.editingId ? (existingItem?.hidden || false) : false
   });
+  item.comments = appState.editingId ? (existingItem?.comments || []) : (appState.pendingEntityNotes?.comments || []);
+  item.tasks = appState.editingId ? (existingItem?.tasks || []) : (appState.pendingEntityNotes?.tasks || []);
   const wasEditing = Boolean(appState.editingId);
   if (item.tracking && item.status !== 'Получено' && item.status !== 'В пути') { item.status = 'В пути'; }
   if (appState.editingId) { const idx = state.items.findIndex(i => i.id === appState.editingId); state.items[idx] = item; }
@@ -1270,6 +1272,7 @@ export function saveItem() {
   syncGlobalTags();
   appState.selectedOrder = orderNumber;
   appState.pendingUploadedMedia = [];
+  appState.pendingEntityNotes = null;
   if (!wasEditing) clearItemDraft();
   closeForm(); persist(); render(); toast(wasEditing ? t('toast.saved') : t('toast.itemAdded'));
 }
@@ -1810,6 +1813,10 @@ export function moveWishToCollection(id) {
   const w = normalizeProductMeta(rawWish);
   closeModal();
   appState.pendingUploadedMedia = Array.isArray(w.media) ? [...w.media] : [];
+  appState.pendingEntityNotes = {
+    comments: Array.isArray(rawWish.comments) ? [...rawWish.comments] : [],
+    tasks: Array.isArray(rawWish.tasks) ? [...rawWish.tasks] : []
+  };
   document.getElementById('fName').value = w.name || ''; document.getElementById('fStore').value = w.store || ''; document.getElementById('fMaker').value = w.manufacturer || '';
   const _dp = (w.releaseDate || '').split(' '); document.getElementById('fDateMonth').value = _dp[0] || ''; document.getElementById('fDateYear').value = _dp[1] || '';
   document.getElementById('fImg').value = (w.imageUrls?.length ? w.imageUrls : (w.imageUrl ? [w.imageUrl] : [])).join(', '); document.getElementById('fShopUrl').value = w.shopUrl || '';
@@ -2163,6 +2170,239 @@ function buildWishlistDetailRows(item, priceEur) {
   ].filter(Boolean).join('');
 }
 
+function normalizeEntityType(type) {
+  return type === 'wishlist' ? 'wishlist' : 'collection';
+}
+
+function getEntityByType(type, id) {
+  const ownerType = normalizeEntityType(type);
+  const list = ownerType === 'wishlist' ? (state.wishlist || []) : (state.items || []);
+  return list.find(item => item.id === id) || null;
+}
+
+function ensureEntityLists(item) {
+  if (!item) return { comments: [], tasks: [] };
+  if (!Array.isArray(item.comments)) item.comments = [];
+  if (!Array.isArray(item.tasks)) item.tasks = [];
+  return { comments: item.comments, tasks: item.tasks };
+}
+
+function entityNoteId() {
+  return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function entityTaskTypeLabel(type) {
+  return {
+    payment: 'Оплата',
+    shipping: 'Доставка',
+    release: 'Релиз',
+    check: 'Проверить',
+    other: 'Другое'
+  }[type] || 'Другое';
+}
+
+function formatEntityDate(value) {
+  if (!value) return '';
+  if (/^\d{4}-\d{2}$/.test(value)) {
+    const [year, month] = value.split('-');
+    return `${month}.${year}`;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('ru');
+}
+
+function refreshEntityAfterNoteAction(type, id) {
+  persist();
+  render();
+  if (appState.entityDetail?.id === id && appState.entityDetail?.type === normalizeEntityType(type)) {
+    openEntityDetail(type, id);
+  }
+}
+
+function renderEntityTasks(type, id, tasks = []) {
+  const active = tasks.filter(task => !task.done);
+  const done = tasks.filter(task => task.done);
+  const ordered = [...active, ...done];
+  if (!ordered.length) return '<div class="entity-note-empty">Задач пока нет</div>';
+  return ordered.map(task => `<div class="entity-task${task.done ? ' done' : ''}">
+    <label class="entity-task-check">
+      <input type="checkbox" ${task.done ? 'checked' : ''} onchange="toggleEntityTask('${type}','${H(id)}','${H(task.id)}')">
+      <span>
+        <strong>${H(task.title || 'Без названия')}</strong>
+        <em>${H(task.note || '')}</em>
+      </span>
+    </label>
+    <div class="entity-task-meta">
+      <span class="badge">${H(entityTaskTypeLabel(task.type))}</span>
+      ${task.dueDate ? `<span>${H(formatEntityDate(task.dueDate))}</span>` : ''}
+    </div>
+    <div class="entity-task-actions">
+      <button class="btn btn-sm" type="button" onclick="editEntityTask('${type}','${H(id)}','${H(task.id)}')">Редактировать</button>
+      <button class="btn btn-sm btn-danger" type="button" onclick="deleteEntityTask('${type}','${H(id)}','${H(task.id)}')">Удалить</button>
+    </div>
+  </div>`).join('');
+}
+
+function renderEntityComments(type, id, comments = []) {
+  if (!comments.length) return '<div class="entity-note-empty">Комментариев пока нет</div>';
+  return [...comments].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map(comment => `<div class="entity-comment">
+    <div>${H(comment.text || '')}</div>
+    <div class="entity-comment-meta">${H(formatEntityDate(comment.createdAt))}</div>
+    <div class="entity-comment-actions">
+      <button class="btn btn-sm" type="button" onclick="editEntityComment('${type}','${H(id)}','${H(comment.id)}')">Редактировать</button>
+      <button class="btn btn-sm btn-danger" type="button" onclick="deleteEntityComment('${type}','${H(id)}','${H(comment.id)}')">Удалить</button>
+    </div>
+  </div>`).join('');
+}
+
+function renderEntityNotesPanel(type, id, item) {
+  const { comments, tasks } = ensureEntityLists(item);
+  return `<section class="entity-notes-panel">
+    <div class="entity-notes-head">
+      <strong>Комментарии и задачи</strong>
+      <span>${tasks.filter(task => !task.done).length} активных</span>
+    </div>
+    <div class="entity-tasks">
+      <h4>Задачи</h4>
+      <div class="entity-task-templates">
+        <button class="btn btn-sm" type="button" onclick="fillEntityTaskTemplate('payment')">Оплатить</button>
+        <button class="btn btn-sm" type="button" onclick="fillEntityTaskTemplate('release')">Проверить релиз</button>
+        <button class="btn btn-sm" type="button" onclick="fillEntityTaskTemplate('shipping')">Проверить трек</button>
+        <button class="btn btn-sm" type="button" onclick="fillEntityTaskTemplate('shop')">Написать магазину</button>
+      </div>
+      <div class="entity-note-form">
+        <input id="entityTaskTitle" type="text" placeholder="Что нужно сделать?">
+        <input id="entityTaskDueDate" type="date" placeholder="Срок выполнения">
+        <select id="entityTaskType">
+          <option value="payment">Оплата</option>
+          <option value="shipping">Доставка</option>
+          <option value="release">Релиз</option>
+          <option value="check">Проверить</option>
+          <option value="other">Другое</option>
+        </select>
+        <textarea id="entityTaskNote" rows="2" placeholder="Заметка к задаче"></textarea>
+        <button class="btn btn-sm" type="button" onclick="addEntityTask('${type}','${H(id)}')">Добавить задачу</button>
+      </div>
+      <div class="entity-task-list">${renderEntityTasks(type, id, tasks)}</div>
+    </div>
+    <div class="entity-comments">
+      <h4>История / комментарии</h4>
+      <div class="entity-note-form">
+        <textarea id="entityCommentText" rows="3" placeholder="Что произошло?"></textarea>
+        <button class="btn btn-sm" type="button" onclick="addEntityComment('${type}','${H(id)}')">Добавить комментарий</button>
+      </div>
+      <div class="entity-comment-list">${renderEntityComments(type, id, comments)}</div>
+    </div>
+  </section>`;
+}
+
+export function fillEntityTaskTemplate(template) {
+  const title = document.getElementById('entityTaskTitle');
+  const type = document.getElementById('entityTaskType');
+  const note = document.getElementById('entityTaskNote');
+  const presets = {
+    payment: ['Оплатить заказ', 'payment', ''],
+    release: ['Проверить релиз', 'release', ''],
+    shipping: ['Проверить трек', 'shipping', ''],
+    shop: ['Написать магазину', 'other', '']
+  };
+  const preset = presets[template] || presets.payment;
+  if (title) title.value = preset[0];
+  if (type) type.value = preset[1];
+  if (note && preset[2]) note.value = preset[2];
+}
+
+export function addEntityTask(type, id) {
+  const item = getEntityByType(type, id);
+  if (!item) return;
+  const { tasks } = ensureEntityLists(item);
+  const title = document.getElementById('entityTaskTitle')?.value.trim() || '';
+  if (!title) return toast('Напиши, что нужно сделать');
+  tasks.push({
+    id: entityNoteId(),
+    title,
+    note: document.getElementById('entityTaskNote')?.value.trim() || '',
+    type: document.getElementById('entityTaskType')?.value || 'other',
+    dueDate: document.getElementById('entityTaskDueDate')?.value || '',
+    done: false,
+    createdAt: Date.now(),
+    completedAt: null
+  });
+  refreshEntityAfterNoteAction(type, id);
+}
+
+export function toggleEntityTask(type, id, taskId) {
+  const item = getEntityByType(type, id);
+  const task = item?.tasks?.find(task => task.id === taskId);
+  if (!task) return;
+  task.done = !task.done;
+  task.completedAt = task.done ? Date.now() : null;
+  refreshEntityAfterNoteAction(type, id);
+}
+
+export function editEntityTask(type, id, taskId) {
+  const item = getEntityByType(type, id);
+  const task = item?.tasks?.find(task => task.id === taskId);
+  if (!task) return;
+  const title = prompt('Что нужно сделать?', task.title || '');
+  if (title == null) return;
+  const dueDate = prompt('Срок (YYYY-MM или YYYY-MM-DD)', task.dueDate || '');
+  if (dueDate == null) return;
+  const taskType = prompt('Тип: payment, shipping, release, check, other', task.type || 'other');
+  if (taskType == null) return;
+  const note = prompt('Заметка', task.note || '');
+  if (note == null) return;
+  task.title = title.trim() || task.title;
+  task.dueDate = dueDate.trim();
+  task.type = ['payment', 'shipping', 'release', 'check', 'other'].includes(taskType.trim()) ? taskType.trim() : 'other';
+  task.note = note.trim();
+  task.updatedAt = Date.now();
+  refreshEntityAfterNoteAction(type, id);
+}
+
+export function deleteEntityTask(type, id, taskId) {
+  const item = getEntityByType(type, id);
+  if (!item?.tasks) return;
+  if (!confirm('Удалить задачу?')) return;
+  item.tasks = item.tasks.filter(task => task.id !== taskId);
+  refreshEntityAfterNoteAction(type, id);
+}
+
+export function addEntityComment(type, id) {
+  const item = getEntityByType(type, id);
+  if (!item) return;
+  const { comments } = ensureEntityLists(item);
+  const text = document.getElementById('entityCommentText')?.value.trim() || '';
+  if (!text) return toast('Напиши комментарий');
+  comments.push({
+    id: entityNoteId(),
+    text,
+    type: 'note',
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  });
+  refreshEntityAfterNoteAction(type, id);
+}
+
+export function editEntityComment(type, id, commentId) {
+  const item = getEntityByType(type, id);
+  const comment = item?.comments?.find(comment => comment.id === commentId);
+  if (!comment) return;
+  const text = prompt('Комментарий', comment.text || '');
+  if (text == null) return;
+  comment.text = text.trim();
+  comment.updatedAt = Date.now();
+  refreshEntityAfterNoteAction(type, id);
+}
+
+export function deleteEntityComment(type, id, commentId) {
+  const item = getEntityByType(type, id);
+  if (!item?.comments) return;
+  if (!confirm('Удалить комментарий?')) return;
+  item.comments = item.comments.filter(comment => comment.id !== commentId);
+  refreshEntityAfterNoteAction(type, id);
+}
+
 function renderProductDetailThumbs(items, activeIndex, ownerId, onSelect, ownerType = 'collection') {
   const mediaFrame = document.getElementById('modalImg')?.parentElement;
   if (!mediaFrame) return;
@@ -2295,6 +2535,13 @@ export function openEntityDetail(type, id) {
   document.getElementById('modalRows').innerHTML = ownerType === 'wishlist'
     ? buildWishlistDetailRows(item, priceEur)
     : buildCollectionDetailRows(item, priceEur);
+  let notesPanel = document.getElementById('entityNotesPanel');
+  if (!notesPanel) {
+    notesPanel = document.createElement('div');
+    notesPanel.id = 'entityNotesPanel';
+    document.getElementById('modalRows').insertAdjacentElement('afterend', notesPanel);
+  }
+  notesPanel.innerHTML = renderEntityNotesPanel(ownerType, id, rawItem);
 
   const imgs = mediaEntriesOf(item);
   appState.entityDetail = { type: ownerType, id, media: imgs, mediaIndex: 0 };
@@ -2364,6 +2611,7 @@ export function closeEntityDetail() {
   document.getElementById('modalImg')?.parentElement?.classList.remove('entity-detail-media', 'product-detail-media', 'wishlist-detail-media');
   document.getElementById('productDetailLightboxBtn')?.remove();
   document.getElementById('productDetailThumbs')?.remove();
+  document.getElementById('entityNotesPanel')?.remove();
   document.getElementById('entityDetailBack')?.remove();
   window.currentModalMedia = [];
   appState.entityDetail = null;
