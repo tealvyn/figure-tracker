@@ -2406,7 +2406,7 @@ export function deleteEntityComment(type, id, commentId) {
 function renderProductDetailThumbs(items, activeIndex, ownerId, onSelect, ownerType = 'collection') {
   const mediaFrame = document.getElementById('modalImg')?.parentElement;
   if (!mediaFrame) return;
-  mediaFrame.classList.add('entity-detail-media', 'product-detail-media');
+  mediaFrame.classList.add('entity-detail-media', 'entity-detail-media-shell', 'product-detail-media');
   mediaFrame.setAttribute('ontouchstart', 'onEntityMediaTouchStart(event)');
   mediaFrame.setAttribute('ontouchend', 'onEntityMediaTouchEnd(event)');
   let lightboxBtn = document.getElementById('productDetailLightboxBtn');
@@ -2443,6 +2443,38 @@ function renderProductDetailThumbs(items, activeIndex, ownerId, onSelect, ownerT
   thumbs.querySelectorAll('[data-media-index]').forEach(button => {
     button.onclick = () => onSelect(Number(button.dataset.mediaIndex || 0));
   });
+}
+
+function unbindEntityDetailMobileCollapse() {
+  const modal = document.querySelector('#modalOverlay .entity-detail-modal');
+  const scroller = document.querySelector('#modalOverlay .modal-body');
+  if (scroller && appState.entityDetailCollapseScrollHandler) {
+    scroller.removeEventListener('scroll', appState.entityDetailCollapseScrollHandler);
+  }
+  modal?.classList.remove('is-media-collapsed');
+  appState.entityDetailCollapseScrollHandler = null;
+}
+
+function bindEntityDetailMobileCollapse() {
+  const modal = document.querySelector('#modalOverlay .entity-detail-modal');
+  const scroller = document.querySelector('#modalOverlay .modal-body');
+  if (!modal || !scroller) return;
+
+  if (appState.entityDetailCollapseScrollHandler) {
+    scroller.removeEventListener('scroll', appState.entityDetailCollapseScrollHandler);
+  }
+
+  const update = () => {
+    if (!window.matchMedia('(max-width: 768px)').matches) {
+      modal.classList.remove('is-media-collapsed');
+      return;
+    }
+    modal.classList.toggle('is-media-collapsed', scroller.scrollTop > 80);
+  };
+
+  appState.entityDetailCollapseScrollHandler = update;
+  scroller.addEventListener('scroll', update, { passive: true });
+  requestAnimationFrame(update);
 }
 
 export function openProductDetail(type, id) {
@@ -2581,6 +2613,7 @@ export function openEntityDetail(type, id) {
   document.getElementById('modalImgPrev').onclick = () => entityDetailNav(-1);
   document.getElementById('modalImgNext').onclick = () => entityDetailNav(1);
   updateModalImg();
+  bindEntityDetailMobileCollapse();
   document.getElementById('modalEdit').onclick = () => { closeEntityDetail(); ownerType === 'wishlist' ? editWish(id) : editItem(id); };
   document.getElementById('modalDelete').onclick = () => {
     if (ownerType === 'wishlist') {
@@ -2598,6 +2631,7 @@ export function openEntityDetail(type, id) {
 export function openModal(id) { return openEntityDetail('collection', id); }
 
 export function closeEntityDetail() {
+  unbindEntityDetailMobileCollapse();
   stopMedia(document.getElementById('modalOverlay'), { resetSrc: true });
   document.getElementById('modalOverlay').style.display = 'none'; appState.modalItemId = null;
   document.getElementById('modalOverlay')?.classList.remove('product-detail-overlay');
@@ -2608,7 +2642,7 @@ export function closeEntityDetail() {
   document.querySelector('#modalOverlay .modal-body')?.classList.remove('entity-detail-info', 'product-detail-info', 'wishlist-detail-info');
   document.getElementById('modalName')?.classList.remove('entity-detail-title', 'product-detail-title');
   document.getElementById('modalRows')?.classList.remove('entity-detail-rows', 'product-detail-meta-grid');
-  document.getElementById('modalImg')?.parentElement?.classList.remove('entity-detail-media', 'product-detail-media', 'wishlist-detail-media');
+  document.getElementById('modalImg')?.parentElement?.classList.remove('entity-detail-media', 'entity-detail-media-shell', 'product-detail-media', 'wishlist-detail-media');
   document.getElementById('productDetailLightboxBtn')?.remove();
   document.getElementById('productDetailThumbs')?.remove();
   document.getElementById('entityNotesPanel')?.remove();
