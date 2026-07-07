@@ -138,11 +138,14 @@ function collectEntityTasks() {
 
 function renderDashboardTaskRows(tasks) {
   if (!tasks.length) return '';
-  return tasks.slice(0, 8).map(({ type, item, task }) => `<button class="dashboard-row dashboard-task-row" onclick="openEntityDetail('${type}','${H(item.id)}')">
+  return tasks.slice(0, 8).map(({ type, item, task }) => `<div class="dashboard-row dashboard-task-row" role="button" tabindex="0" onclick="openEntityDetail('${type}','${H(item.id)}')">
     ${item.imageUrl ? `<img src="${H(item.imageUrl)}" alt="" loading="lazy" onerror="this.style.opacity='.1'">` : `<span class="dashboard-row-icon">!</span>`}
     <span class="dashboard-row-main"><strong>${H(task.title || 'Задача')}</strong><small>${H(taskDueLabel(task.dueDate))} · ${H(item.name || '—')}</small></span>
-    <span class="dashboard-row-side"><span class="badge">${H(taskTypeLabel(task.type))}</span></span>
-  </button>`).join('');
+    <span class="dashboard-row-side">
+      <span class="badge">${H(taskTypeLabel(task.type))}</span>
+      <button class="dashboard-task-done" type="button" title="Выполнено" onclick="event.stopPropagation();toggleEntityTask('${type}','${H(item.id)}','${H(task.id)}')">✓</button>
+    </span>
+  </div>`).join('');
 }
 
 export function renderCollectionStatusBar(statusCounts, totalOrders = 0) {

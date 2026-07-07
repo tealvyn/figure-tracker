@@ -124,12 +124,15 @@ export function normalizeReleaseStatus(value) {
 }
 
 export function buildSearchText(item = {}) {
+  const comments = (item.comments || []).map(comment => comment?.text || '');
+  const tasks = (item.tasks || []).flatMap(task => [task?.title, task?.note, task?.type]);
   return [
     item.name,
     item.orderName,
     item.orderNumber,
     item.store,
     item.manufacturer,
+    item.tracking,
     item.releaseDate,
     item.preorderStart,
     item.preorderEnd,
@@ -144,6 +147,8 @@ export function buildSearchText(item = {}) {
     item.status,
     item.paymentStatus,
     item.currency,
+    ...comments,
+    ...tasks,
     ...(item.tags || [])
   ].filter(Boolean).join(' ').toLowerCase();
 }

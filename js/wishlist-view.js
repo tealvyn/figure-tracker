@@ -1,5 +1,5 @@
 // js/wishlist-view.js
-import { state, appState, persist, toEur } from './state.js';
+import { state, appState, persist, toEur, buildChangeHistoryComments, appendSystemHistoryComments } from './state.js';
 import { H, eur } from './utils.js';
 import { toast } from './notifications.js';
 import { applyI18n, t } from './i18n.js';
@@ -238,7 +238,13 @@ export function saveWish() {
     notes: document.getElementById('wNotes').value.trim(),
     priority: document.getElementById('wPriority').value,
     tags: (document.getElementById('wTags')?.value || '').split(',').map(t => t.trim()).filter(Boolean),
-    comments: appState.editingWishId ? (existingWish?.comments || []) : [],
+    comments: appState.editingWishId ? appendSystemHistoryComments([...(existingWish?.comments || [])], buildChangeHistoryComments(existingWish, {
+      store: document.getElementById('wStore').value.trim(),
+      priceOriginal: parseFloat(document.getElementById('wPrice').value) || 0,
+      currency: document.getElementById('wCurrency').value,
+      releaseDate: formatReleaseDate(document.getElementById('wDate').value.trim()),
+      shopUrl: document.getElementById('wShopUrl').value.trim()
+    })) : [],
     tasks: appState.editingWishId ? (existingWish?.tasks || []) : [],
     createdAt: appState.editingWishId ? (state.wishlist?.find(w => w.id === appState.editingWishId)?.createdAt || Date.now()) : Date.now()
   });

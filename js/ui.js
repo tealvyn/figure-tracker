@@ -1,5 +1,5 @@
 ﻿// js/ui.js
-import { state, appState, persist, schedulePersist, toEur } from './state.js';
+import { state, appState, persist, schedulePersist, toEur, buildChangeHistoryComments, appendSystemHistoryComments, addSystemHistoryComment } from './state.js';
 import { H, eur, calcAmiAmiShipping, calcOrder, SCALE_WEIGHTS } from './utils.js';
 import * as API from './api.js';
 import { applyI18n, t } from './i18n.js';
@@ -475,10 +475,10 @@ export function syncGlobalTags() {
 
 export function ensureSearchIndexes() {
   (state.items || []).forEach(item => {
-    if (item && !item._searchText) item._searchText = buildSearchText(item);
+    if (item) item._searchText = buildSearchText(item);
   });
   (state.wishlist || []).forEach(wish => {
-    if (wish && !wish._searchText) wish._searchText = buildSearchText(wish);
+    if (wish) wish._searchText = buildSearchText(wish);
   });
 }
 
@@ -523,6 +523,8 @@ export function renderGlobalSearchCounts() {
 }
 
 function globalSearchTextOf(item = {}, type = 'collection') {
+  const comments = (item.comments || []).map(comment => comment?.text || '');
+  const tasks = (item.tasks || []).flatMap(task => [task?.title, task?.note, task?.type]);
   return [
     item.name,
     item.orderNumber,
@@ -531,6 +533,7 @@ function globalSearchTextOf(item = {}, type = 'collection') {
     item.manufacturer,
     item.region,
     item.status,
+    item.tracking,
     item.jan,
     item.sku,
     item.code,
@@ -540,8 +543,24 @@ function globalSearchTextOf(item = {}, type = 'collection') {
     item.sourceUrl,
     type === 'wishlist' ? item.priority : '',
     type === 'wishlist' ? (item.notes || item.note) : '',
+    ...comments,
+    ...tasks,
     ...(item.tags || [])
   ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function globalSearchMatchContext(item = {}, query = getGlobalSearchQuery()) {
+  const words = getGlobalSearchWords(query);
+  if (!words.length) return null;
+  const matchText = value => {
+    const text = String(value || '').toLowerCase();
+    return text && words.every(word => text.includes(word));
+  };
+  const task = (item.tasks || []).find(task => matchText(`${task?.title || ''} ${task?.note || ''}`));
+  if (task) return { kind: 'task', label: 'Задача', text: [task.title, task.note].filter(Boolean).join(' · ') };
+  const comment = (item.comments || []).find(comment => matchText(comment?.text));
+  if (comment) return { kind: 'comment', label: 'Комментарий', text: comment.text || '' };
+  return null;
 }
 
 function highlightSearchMatch(text, query) {
@@ -568,10 +587,10 @@ function getGlobalSearchResults(query = getGlobalSearchQuery()) {
   };
   const collection = (state.items || [])
     .filter(item => matches(item, 'collection'))
-    .map(item => ({ type: 'collection', item }));
+    .map(item => ({ type: 'collection', item, context: globalSearchMatchContext(item, q) }));
   const wishlist = (state.wishlist || [])
     .filter(item => matches(item, 'wishlist'))
-    .map(item => ({ type: 'wishlist', item }));
+    .map(item => ({ type: 'wishlist', item, context: globalSearchMatchContext(item, q) }));
   return [...collection, ...wishlist].slice(0, 10);
 }
 
@@ -603,12 +622,14 @@ export function renderGlobalSearchResults() {
     const meta = isWish
       ? [item.priority, item.manufacturer, item.store].filter(Boolean).join(' · ')
       : [item.orderNumber || item.orderName, item.status, item.store].filter(Boolean).join(' · ');
+    const context = result.context;
     return `<button class="global-search-result${index === 0 ? ' active' : ''}" type="button" data-result-index="${index}">
       ${thumb ? `<img class="global-search-result-img" src="${H(thumb)}" alt="" loading="lazy" onerror="this.style.opacity='.2'">` : `<span class="global-search-result-img"></span>`}
       <span class="global-search-result-body">
         <span class="global-search-result-badge">${badge}</span>
         <span class="global-search-result-name">${highlightSearchMatch(item.name || '—', query)}</span>
         <span class="global-search-result-meta">${highlightSearchMatch(meta || '—', query)}</span>
+        ${context ? `<span class="global-search-result-context"><span>${H(context.label)}</span>${highlightSearchMatch(context.text, query)}</span>` : ''}
       </span>
     </button>`;
   }).join('');
@@ -1263,10 +1284,14 @@ export function saveItem() {
     createdAt: appState.editingId ? (existingItem?.createdAt || Date.now()) : Date.now(),
     hidden: appState.editingId ? (existingItem?.hidden || false) : false
   });
-  item.comments = appState.editingId ? (existingItem?.comments || []) : (appState.pendingEntityNotes?.comments || []);
+  const hadTracking = Boolean(String(existingItem?.tracking || '').trim());
+  const hasTracking = Boolean(String(item.tracking || '').trim());
+  const trackingAdded = !hadTracking && hasTracking;
+  if (trackingAdded && item.status !== 'Получено' && item.status !== 'В пути') { item.status = 'В пути'; }
+  const historyComments = buildChangeHistoryComments(existingItem, item);
+  item.comments = appState.editingId ? appendSystemHistoryComments([...(existingItem?.comments || [])], historyComments) : (appState.pendingEntityNotes?.comments || []);
   item.tasks = appState.editingId ? (existingItem?.tasks || []) : (appState.pendingEntityNotes?.tasks || []);
   const wasEditing = Boolean(appState.editingId);
-  if (item.tracking && item.status !== 'Получено' && item.status !== 'В пути') { item.status = 'В пути'; }
   if (appState.editingId) { const idx = state.items.findIndex(i => i.id === appState.editingId); state.items[idx] = item; }
   else state.items.push(item);
   syncGlobalTags();
@@ -2211,6 +2236,26 @@ function formatEntityDate(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('ru');
 }
 
+function toDateInputValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseEntityReleaseDate(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const numeric = raw.match(/\b(20\d{2})[\/.-](0?[1-9]|1[0-2])(?:[\/.-](0?[1-9]|[12]\d|3[01]))?\b/);
+  if (numeric) return new Date(Number(numeric[1]), Number(numeric[2]) - 1, Number(numeric[3] || 1));
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) return date;
+  const parsed = parseReleaseDate(raw);
+  if (parsed?.year && parsed.month >= 0) return new Date(parsed.year, parsed.month, 1);
+  return null;
+}
+
 function refreshEntityAfterNoteAction(type, id) {
   persist();
   render();
@@ -2222,9 +2267,7 @@ function refreshEntityAfterNoteAction(type, id) {
 function renderEntityTasks(type, id, tasks = []) {
   const active = tasks.filter(task => !task.done);
   const done = tasks.filter(task => task.done);
-  const ordered = [...active, ...done];
-  if (!ordered.length) return '<div class="entity-note-empty">Задач пока нет</div>';
-  return ordered.map(task => `<div class="entity-task${task.done ? ' done' : ''}">
+  const renderTask = task => `<div class="entity-task${task.done ? ' done' : ''}">
     <label class="entity-task-check">
       <input type="checkbox" ${task.done ? 'checked' : ''} onchange="toggleEntityTask('${type}','${H(id)}','${H(task.id)}')">
       <span>
@@ -2235,24 +2278,35 @@ function renderEntityTasks(type, id, tasks = []) {
     <div class="entity-task-meta">
       <span class="badge">${H(entityTaskTypeLabel(task.type))}</span>
       ${task.dueDate ? `<span>${H(formatEntityDate(task.dueDate))}</span>` : ''}
+      ${task.done && task.completedAt ? `<span>Выполнено: ${H(formatEntityDate(task.completedAt))}</span>` : ''}
     </div>
     <div class="entity-task-actions">
       <button class="btn btn-sm" type="button" onclick="editEntityTask('${type}','${H(id)}','${H(task.id)}')">Редактировать</button>
       <button class="btn btn-sm btn-danger" type="button" onclick="deleteEntityTask('${type}','${H(id)}','${H(task.id)}')">Удалить</button>
     </div>
-  </div>`).join('');
-}
+  </div>`;
 
+  if (!active.length && !done.length) return '<div class="entity-note-empty">Задач пока нет</div>';
+
+  return `${active.length ? active.map(renderTask).join('') : '<div class="entity-note-empty">Активных задач нет</div>'}
+    ${done.length ? `<details class="entity-completed-tasks">
+      <summary>Выполненные задачи <span>${done.length}</span></summary>
+      <div class="entity-completed-task-list">${done.map(renderTask).join('')}</div>
+    </details>` : ''}`;
+}
 function renderEntityComments(type, id, comments = []) {
   if (!comments.length) return '<div class="entity-note-empty">Комментариев пока нет</div>';
-  return [...comments].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map(comment => `<div class="entity-comment">
-    <div>${H(comment.text || '')}</div>
+  return [...comments].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map(comment => {
+    const isSystem = comment.type === 'system';
+    return `<div class="entity-comment${isSystem ? ' system' : ''}">
+    <div class="entity-comment-text">${isSystem ? '<span class="entity-comment-badge">auto</span>' : ''}${H(comment.text || '')}</div>
     <div class="entity-comment-meta">${H(formatEntityDate(comment.createdAt))}</div>
     <div class="entity-comment-actions">
-      <button class="btn btn-sm" type="button" onclick="editEntityComment('${type}','${H(id)}','${H(comment.id)}')">Редактировать</button>
+      ${isSystem ? '' : `<button class="btn btn-sm" type="button" onclick="editEntityComment('${type}','${H(id)}','${H(comment.id)}')">Редактировать</button>`}
       <button class="btn btn-sm btn-danger" type="button" onclick="deleteEntityComment('${type}','${H(id)}','${H(comment.id)}')">Удалить</button>
     </div>
-  </div>`).join('');
+  </div>`;
+  }).join('');
 }
 
 function renderEntityNotesPanel(type, id, item) {
@@ -2270,9 +2324,16 @@ function renderEntityNotesPanel(type, id, item) {
         <button class="btn btn-sm" type="button" onclick="fillEntityTaskTemplate('shipping')">Проверить трек</button>
         <button class="btn btn-sm" type="button" onclick="fillEntityTaskTemplate('shop')">Написать магазину</button>
       </div>
-      <div class="entity-note-form">
+      <div class="entity-note-form" id="entityTaskForm">
         <input id="entityTaskTitle" type="text" placeholder="Что нужно сделать?">
         <input id="entityTaskDueDate" type="date" placeholder="Срок выполнения">
+        <div class="entity-task-date-presets">
+          <button class="btn btn-sm" type="button" onclick="fillEntityTaskDueDate('today')">Сегодня</button>
+          <button class="btn btn-sm" type="button" onclick="fillEntityTaskDueDate('week')">Через неделю</button>
+          <button class="btn btn-sm" type="button" onclick="fillEntityTaskDueDate('thisMonth')">До конца месяца</button>
+          <button class="btn btn-sm" type="button" onclick="fillEntityTaskDueDate('nextMonth')">До конца следующего</button>
+          <button class="btn btn-sm" type="button" onclick="fillEntityTaskDueDate('beforeRelease')">За месяц до релиза</button>
+        </div>
         <select id="entityTaskType">
           <option value="payment">Оплата</option>
           <option value="shipping">Доставка</option>
@@ -2281,7 +2342,10 @@ function renderEntityNotesPanel(type, id, item) {
           <option value="other">Другое</option>
         </select>
         <textarea id="entityTaskNote" rows="2" placeholder="Заметка к задаче"></textarea>
-        <button class="btn btn-sm" type="button" onclick="addEntityTask('${type}','${H(id)}')">Добавить задачу</button>
+        <div class="entity-task-form-actions">
+          <button class="btn btn-sm" id="entityTaskSubmit" type="button" onclick="addEntityTask('${type}','${H(id)}')">Добавить задачу</button>
+          <button class="btn btn-sm muted" id="entityTaskCancel" type="button" onclick="cancelEntityTaskEdit()" hidden>Отмена</button>
+        </div>
       </div>
       <div class="entity-task-list">${renderEntityTasks(type, id, tasks)}</div>
     </div>
@@ -2312,22 +2376,90 @@ export function fillEntityTaskTemplate(template) {
   if (note && preset[2]) note.value = preset[2];
 }
 
+export function fillEntityTaskDueDate(preset) {
+  const input = document.getElementById('entityTaskDueDate');
+  if (!input) return;
+  const today = new Date();
+  let date = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  if (preset === 'week') {
+    date.setDate(date.getDate() + 7);
+  } else if (preset === 'thisMonth') {
+    date = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  } else if (preset === 'nextMonth') {
+    date = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+  } else if (preset === 'beforeRelease') {
+    const detail = appState.entityDetail;
+    const item = detail ? getEntityByType(detail.type, detail.id) : null;
+    const releaseDate = parseEntityReleaseDate(item?.releaseDate);
+    if (!releaseDate) {
+      toast('Не удалось определить дату релиза');
+      return;
+    }
+    date = new Date(releaseDate.getFullYear(), releaseDate.getMonth() - 1, releaseDate.getDate());
+  }
+
+  input.value = toDateInputValue(date);
+}
+
+function setEntityTaskEditMode(task = null) {
+  const form = document.getElementById('entityTaskForm');
+  const submit = document.getElementById('entityTaskSubmit');
+  const cancel = document.getElementById('entityTaskCancel');
+  if (!form || !submit || !cancel) return;
+  if (task) {
+    form.dataset.editingTaskId = task.id;
+    submit.textContent = 'Сохранить задачу';
+    cancel.hidden = false;
+  } else {
+    delete form.dataset.editingTaskId;
+    submit.textContent = 'Добавить задачу';
+    cancel.hidden = true;
+  }
+}
+
+function clearEntityTaskForm() {
+  const title = document.getElementById('entityTaskTitle');
+  const dueDate = document.getElementById('entityTaskDueDate');
+  const type = document.getElementById('entityTaskType');
+  const note = document.getElementById('entityTaskNote');
+  if (title) title.value = '';
+  if (dueDate) dueDate.value = '';
+  if (type) type.value = 'other';
+  if (note) note.value = '';
+}
+
+export function cancelEntityTaskEdit() {
+  clearEntityTaskForm();
+  setEntityTaskEditMode(null);
+}
+
 export function addEntityTask(type, id) {
   const item = getEntityByType(type, id);
   if (!item) return;
   const { tasks } = ensureEntityLists(item);
   const title = document.getElementById('entityTaskTitle')?.value.trim() || '';
   if (!title) return toast('Напиши, что нужно сделать');
-  tasks.push({
-    id: entityNoteId(),
+  const form = document.getElementById('entityTaskForm');
+  const editingTaskId = form?.dataset?.editingTaskId || '';
+  const existingTask = editingTaskId ? tasks.find(task => task.id === editingTaskId) : null;
+  const nextValues = {
     title,
     note: document.getElementById('entityTaskNote')?.value.trim() || '',
     type: document.getElementById('entityTaskType')?.value || 'other',
-    dueDate: document.getElementById('entityTaskDueDate')?.value || '',
-    done: false,
-    createdAt: Date.now(),
-    completedAt: null
-  });
+    dueDate: document.getElementById('entityTaskDueDate')?.value || ''
+  };
+  if (existingTask) {
+    Object.assign(existingTask, nextValues, { updatedAt: Date.now() });
+  } else {
+    tasks.push({
+      id: entityNoteId(),
+      ...nextValues,
+      done: false,
+      createdAt: Date.now(),
+      completedAt: null
+    });
+  }
   refreshEntityAfterNoteAction(type, id);
 }
 
@@ -2337,6 +2469,13 @@ export function toggleEntityTask(type, id, taskId) {
   if (!task) return;
   task.done = !task.done;
   task.completedAt = task.done ? Date.now() : null;
+  const { comments } = ensureEntityLists(item);
+  addSystemHistoryComment(
+    comments,
+    task.done
+      ? `Задача выполнена: ${task.title || 'Без названия'}`
+      : `Задача возвращена в активные: ${task.title || 'Без названия'}`
+  );
   refreshEntityAfterNoteAction(type, id);
 }
 
@@ -2344,20 +2483,16 @@ export function editEntityTask(type, id, taskId) {
   const item = getEntityByType(type, id);
   const task = item?.tasks?.find(task => task.id === taskId);
   if (!task) return;
-  const title = prompt('Что нужно сделать?', task.title || '');
-  if (title == null) return;
-  const dueDate = prompt('Срок (YYYY-MM или YYYY-MM-DD)', task.dueDate || '');
-  if (dueDate == null) return;
-  const taskType = prompt('Тип: payment, shipping, release, check, other', task.type || 'other');
-  if (taskType == null) return;
-  const note = prompt('Заметка', task.note || '');
-  if (note == null) return;
-  task.title = title.trim() || task.title;
-  task.dueDate = dueDate.trim();
-  task.type = ['payment', 'shipping', 'release', 'check', 'other'].includes(taskType.trim()) ? taskType.trim() : 'other';
-  task.note = note.trim();
-  task.updatedAt = Date.now();
-  refreshEntityAfterNoteAction(type, id);
+  const title = document.getElementById('entityTaskTitle');
+  const dueDate = document.getElementById('entityTaskDueDate');
+  const taskType = document.getElementById('entityTaskType');
+  const note = document.getElementById('entityTaskNote');
+  if (title) title.value = task.title || '';
+  if (dueDate) dueDate.value = task.dueDate || '';
+  if (taskType) taskType.value = task.type || 'other';
+  if (note) note.value = task.note || '';
+  setEntityTaskEditMode(task);
+  title?.focus();
 }
 
 export function deleteEntityTask(type, id, taskId) {
