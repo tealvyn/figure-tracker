@@ -47,57 +47,57 @@
 
 **Note:** I may add more languages in the future (probably using a translator 😅).
 
-    function doPost(e) {
-      try {
-        if (!e || !e.postData || !e.postData.contents) throw new Error("Нет данных");
-        const payload = JSON.parse(e.postData.contents);
-    
-        // === ЗАГРУЗКА КАРТИНКИ || Loading image ===
-        // Если приложение прислало специальную команду 'uploadImage'
-        if (payload.action === 'uploadImage') {
-          const FOLDER_NAME = 'FigureTracker_Photos';
-          let folders = DriveApp.getRootFolder().getFoldersByName(FOLDER_NAME);
-          let folder = folders.hasNext() ? folders.next() : DriveApp.getRootFolder().createFolder(FOLDER_NAME);
-    
-          // Конвертируем текстовый код (Base64) обратно в картинку
-          const blob = Utilities.newBlob(Utilities.base64Decode(payload.base64), payload.mimeType, payload.filename);
-          const file = folder.createFile(blob);
+          // === ГЛОБАЛЬНЫЕ НАСТРОЙКИ (видны всем функциям) ===
+      const FILE_NAME = 'figure-tracker-backup.json';
+      const PREV_FILE_NAME = 'figure-tracker-backup-prev.json';
+      
+      // === ОБРАБОТКА POST ЗАПРОСОВ (Сохранение бэкапа и загрузка фото) ===
+      function doPost(e) {
+        try {
+          if (!e || !e.postData || !e.postData.contents) throw new Error("Нет данных");
+          const payload = JSON.parse(e.postData.contents);
+      
+          // Режим 1: Загрузка картинки
+          if (payload.action === 'uploadImage') {
+            const FOLDER_NAME = 'FigureTracker_Photos';
+            let folders = DriveApp.getRootFolder().getFoldersByName(FOLDER_NAME);
+            let folder = folders.hasNext() ? folders.next() : DriveApp.getRootFolder().createFolder(FOLDER_NAME);
+      
+            const blob = Utilities.newBlob(Utilities.base64Decode(payload.base64), payload.mimeType, payload.filename);
+            const file = folder.createFile(blob);
+            
+            file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      
+            const directUrl = 'https://lh3.googleusercontent.com/d/' + file.getId();
+            return ContentService.createTextOutput(JSON.stringify({ ok: true, url: directUrl }))
+              .setMimeType(ContentService.MimeType.JSON);
+          }
+      
+          // Режим 2: Сохранение бэкапа базы данных
+          const content = JSON.stringify(payload, null, 2);
+          const folder = DriveApp.getRootFolder();
           
-          // Даем картинке доступ "По ссылке", чтобы она могла загрузиться в галерее
-          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    
-          // Генерируем специальную ссылку для тега <img>
-    const directUrl = 'https://lh3.googleusercontent.com/d/' + file.getId();
-          return ContentService.createTextOutput(JSON.stringify({ ok: true, url: directUrl }))
+          const prevFiles = folder.getFilesByName(PREV_FILE_NAME);
+          while (prevFiles.hasNext()) prevFiles.next().setTrashed(true);
+          
+          const currentFiles = folder.getFilesByName(FILE_NAME);
+          if (currentFiles.hasNext()) currentFiles.next().setName(PREV_FILE_NAME);
+          
+          folder.createFile(FILE_NAME, content, MimeType.PLAIN_TEXT);
+      
+          return ContentService.createTextOutput(JSON.stringify({ ok: true, filename: FILE_NAME }))
+            .setMimeType(ContentService.MimeType.JSON);
+      
+        } catch(err) {
+          return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message }))
             .setMimeType(ContentService.MimeType.JSON);
         }
-    
-        // === СОХРАНЕНИЕ БЭКАПА || Save backup ===
-        const FILE_NAME = 'figure-tracker-backup.json';
-        const PREV_FILE_NAME = 'figure-tracker-backup-prev.json';
-        
-        const content = JSON.stringify(payload, null, 2);
-        const folder = DriveApp.getRootFolder();
-        
-        const prevFiles = folder.getFilesByName(PREV_FILE_NAME);
-        while (prevFiles.hasNext()) prevFiles.next().setTrashed(true);
-        
-        const currentFiles = folder.getFilesByName(FILE_NAME);
-        if (currentFiles.hasNext()) currentFiles.next().setName(PREV_FILE_NAME);
-        
-        folder.createFile(FILE_NAME, content, MimeType.PLAIN_TEXT);
-    
-        return ContentService.createTextOutput(JSON.stringify({ ok: true, filename: FILE_NAME }))
-          .setMimeType(ContentService.MimeType.JSON);
-    
-      } catch(err) {
-        return ContentService.createTextOutput(JSON.stringify({ ok: false, error: err.message }))
-          .setMimeType(ContentService.MimeType.JSON);
       }
-    }
       
+      // === ОБРАБОТКА GET ЗАПРОСОВ (Автозаполнение AmiAmi и Загрузка бэкапа) ===
       function doGet(e) {
         try {
+          
           const version = (e.parameter && e.parameter.version === 'prev') ? PREV_FILE_NAME : FILE_NAME;
           const files = DriveApp.getRootFolder().getFilesByName(version);
       
@@ -115,6 +115,12 @@
       
         } catch(err) {
           return ContentService
+            .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
+            .setMimeType(ContentService.MimeType.JSON);
+        }
+      }
+
+
             .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
             .setMimeType(ContentService.MimeType.JSON);
         }
