@@ -1,5 +1,5 @@
 // js/wishlist-view.js
-import { state, appState, persist, toEur, buildChangeHistoryComments, appendSystemHistoryComments } from './state.js';
+import { state, appState, persist, toEur, buildChangeHistoryComments, appendSystemHistoryComments, getDefaultCurrency } from './state.js';
 import { H, eur } from './utils.js';
 import { toast } from './notifications.js';
 import { applyI18n, t } from './i18n.js';
@@ -7,6 +7,15 @@ import { buildSearchText, formatReleaseDate, mergeTags, normalizeProductMeta, re
 import { getMediaKind, getMediaUrl, isTelegramFileUrl, isVideoUrl } from './media-storage.js';
 
 const PRIORITY_COLOR = { high: 'var(--red)', mid: 'var(--yellow)', low: 'var(--muted)' };
+const CURRENCY_OPTIONS = ['EUR', 'USD', 'JPY', 'UAH'];
+
+function refreshWishCurrencyOptions(selectedValue) {
+  const select = document.getElementById('wCurrency');
+  if (!select) return;
+  const current = selectedValue || select.value || getDefaultCurrency();
+  select.innerHTML = CURRENCY_OPTIONS.map(currency => `<option value="${H(currency)}">${H(currency)}</option>`).join('');
+  select.value = CURRENCY_OPTIONS.includes(current) ? current : getDefaultCurrency();
+}
 
 function priorityLabel(priority) {
   const labels = {
@@ -176,11 +185,12 @@ export function closeWishForm() {
 }
 
 export function clearWishForm() {
+  refreshWishCurrencyOptions();
   ['wName', 'wStore', 'wMaker', 'wPrice', 'wDate', 'wImg', 'wShopUrl', 'wNotes', 'wJan', 'wSku', 'wPreorderStart', 'wPreorderEnd', 'wSource', 'wSourceUrl', 'wTags'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  document.getElementById('wCurrency').value = 'JPY';
+  document.getElementById('wCurrency').value = getDefaultCurrency();
   document.getElementById('wPriority').value = 'mid';
   if (document.getElementById('wReleaseStatus')) document.getElementById('wReleaseStatus').value = 'unknown';
   document.getElementById('wishFormTitle').dataset.i18n = 'wish.formTitle';
@@ -277,6 +287,7 @@ export function deleteWish(id) {
 export function editWish(id) {
   const rawWish = (state.wishlist || []).find(x => x.id === id);
   if (!rawWish) return;
+  refreshWishCurrencyOptions(rawWish.currency || getDefaultCurrency());
   const w = normalizeProductMeta(rawWish);
   appState.editingWishId = id;
   appState.pendingWishUploadedMedia = [];
@@ -285,7 +296,7 @@ export function editWish(id) {
   document.getElementById('wStore').value = w.store || '';
   document.getElementById('wMaker').value = w.manufacturer || '';
   document.getElementById('wPrice').value = w.priceOriginal || '';
-  document.getElementById('wCurrency').value = w.currency || 'JPY';
+  document.getElementById('wCurrency').value = w.currency || getDefaultCurrency();
   document.getElementById('wDate').value = w.releaseDate || '';
   document.getElementById('wImg').value = wishFormUrls(w).join(', ');
   document.getElementById('wShopUrl').value = w.shopUrl || '';
@@ -346,7 +357,7 @@ export function renderWishlist() {
         ${wish.store ? `<div class="wish-meta">${H(wish.store)}</div>` : ''}
         ${wish.manufacturer ? `<div class="wish-meta">${H(wish.manufacturer)}</div>` : ''}
         ${wish.releaseDate ? `<div class="wish-meta">${t('wishlist.release')}: ${H(wish.releaseDate)}</div>` : ''}
-        ${wish.priceOriginal ? `<div class="wish-meta" style="color:var(--accent);margin-top:4px;">${H(String(wish.priceOriginal))} ${H(wish.currency || '')} · ~€${priceEur}</div>` : ''}
+        ${wish.priceOriginal ? `<div class="wish-meta" style="color:var(--accent);margin-top:4px;">${H(String(wish.priceOriginal))} ${H(wish.currency || '')} · ~${eur(priceEur)}</div>` : ''}
         <div class="wish-price" style="color:${PRIORITY_COLOR[wish.priority]}">${priorityLabel(wish.priority)}</div>
         <div class="product-badges">${renderProductMetaBadges(wish)}</div>
         ${wish.tags?.length ? `<div class="tags">${wish.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</div>` : ''}

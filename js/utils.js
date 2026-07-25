@@ -33,8 +33,35 @@ function mediaTag(url, className = 'figure-img', alt = '') {
   return `<img class="${className}" src="${safeUrl}" alt="${safeAlt}" onerror="this.style.opacity='.1'">`;
 }
 
-export function eur(n) { 
-  return '€' + Number(n || 0).toFixed(2); 
+export function fromEur(amount, currency = state.settings?.displayCurrency || state.settings?.regionalRules?.displayCurrency || 'EUR') {
+  const value = Number(amount) || 0;
+  const code = String(currency || 'EUR').toUpperCase();
+  if (code === 'EUR') return value;
+  const rate = Number(state.rates?.[code]) || 0;
+  return rate ? value / rate : value;
+}
+
+export function toBaseEur(amount, currency = state.settings?.displayCurrency || state.settings?.regionalRules?.displayCurrency || 'EUR') {
+  const value = Number(amount) || 0;
+  const code = String(currency || 'EUR').toUpperCase();
+  if (code === 'EUR') return value;
+  const rate = Number(state.rates?.[code]) || 0;
+  return rate ? value * rate : value;
+}
+
+export function eur(n) {
+  const currency = String(state.settings?.displayCurrency || state.settings?.regionalRules?.displayCurrency || 'EUR').toUpperCase();
+  const amount = fromEur(n, currency);
+  try {
+    return new Intl.NumberFormat(currency === 'UAH' ? 'uk-UA' : undefined, {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`;
+  }
 }
 
 export const SCALE_WEIGHTS = {
@@ -64,19 +91,130 @@ export function calcOrzGKShipping(kg) {
 }
 
 export function calcOrder(order) {
-  const storeName = (order.store || '').toLowerCase();
-  const isOrzGK = storeName.includes('orzgk') || storeName.includes('orz');
-  const isEU = ['ЕС'].includes(order.items[0]?.region?.trim().toUpperCase()) || isOrzGK;
-  
   const goodsEur = order.items.reduce((s, i) => s + toEur(i.priceOriginal || 0, i.currency || 'EUR'), 0);
   const shippingEur = Math.max(0, ...order.items.map(i => Number(i.shippingEur || 0)));
   const taxBase = +(goodsEur + shippingEur).toFixed(2);
-  
-  const alv = isEU ? 0 : +(taxBase * 0.255).toFixed(2);
-  const customs = isEU ? 0 : (taxBase > 150 ? +(taxBase * 0.047).toFixed(2) : 0);
+  const firstItem = order.items[0] || {};
+  const estimate = calculateImportEstimate({
+    ...firstItem,
+    store: order.store || firstItem.store,
+    priceOriginal: goodsEur,
+    currency: 'EUR',
+    shippingEur
+  }, state.settings || {}, state.rates || {});
+  const isDomestic = isImportExempt(firstItem, state.settings || {}, order.store);
+  const alv = estimate.enabled ? estimate.vat : 0;
+  const customs = estimate.enabled
+    ? +(estimate.importDuty + estimate.customsFee + estimate.brokerFee + estimate.domesticShipping).toFixed(2)
+    : 0;
   const total = +(taxBase + alv + customs).toFixed(2);
   const deposit = Math.max(0, ...order.items.map(i => Number(i.deposit || 0)));
   const remaining = +Math.max(total - deposit, 0).toFixed(2);
   
-  return { goodsEur, shippingEur, taxBase, alv, customs, total, deposit, remaining, isEU };
+  return {
+    goodsEur,
+    shippingEur,
+    taxBase,
+    alv,
+    customs,
+    total,
+    deposit,
+    remaining,
+    isDomestic,
+    overLimitAmount: estimate.overLimitAmount || 0
+  };
+}
+
+function convertToEur(amount, currency, rates = state.rates || {}) {
+  const value = Number(amount) || 0;
+  const code = String(currency || 'EUR').toUpperCase();
+  if (!value) return 0;
+  if (code === 'EUR') return value;
+  const rate = Number(rates[code]) || 0;
+  return rate ? +(value * rate).toFixed(2) : null;
+}
+
+function isImportExempt(item = {}, settings = {}, storeOverride = '') {
+  const rules = settings.regionalRules || {};
+  const profile = String(rules.countryProfile || settings.countryProfile || '').toLowerCase();
+  const region = String(item.region || '').trim().toUpperCase();
+  const store = String(storeOverride || item.store || '').trim().toLowerCase();
+  if (store.includes('orzgk') || store.includes('orz')) return true;
+  if (profile === 'ua') return ['УКРАИНА', 'УКРАЇНА', 'UKRAINE'].includes(region);
+  if (profile === 'fi') return ['ЕС', 'ЄС', 'EU'].includes(region);
+  return false;
+}
+
+export function calculateImportEstimate(item, settings = {}, rates = state.rates || {}) {
+  const rules = settings.regionalRules || {};
+  const warnings = [];
+  const offResult = {
+    enabled: false,
+    taxableBase: 0,
+    overLimitAmount: 0,
+    importDuty: 0,
+    vat: 0,
+    customsFee: 0,
+    brokerFee: 0,
+    domesticShipping: 0,
+    estimatedTotalExtra: 0,
+    estimatedGrandTotal: 0,
+    warnings
+  };
+
+  if (!rules || rules.taxCalculationMode === 'off') return offResult;
+
+  const price = Number(item?.priceOriginal) || 0;
+  const currency = item?.currency || 'EUR';
+  if (!price) warnings.push('missingAmount');
+
+  const goodsEur = toEur(price, currency);
+  if (currency !== 'EUR' && !rates[currency]) warnings.push('missingItemRate');
+
+  const shippingEur = Number(item?.shippingEur) || 0;
+  const taxableBase = +(goodsEur + shippingEur).toFixed(2);
+  if (isImportExempt(item, settings)) {
+    return {
+      enabled: true,
+      taxableBase,
+      overLimitAmount: 0,
+      importDuty: 0,
+      vat: 0,
+      customsFee: 0,
+      brokerFee: 0,
+      domesticShipping: 0,
+      estimatedTotalExtra: 0,
+      estimatedGrandTotal: taxableBase,
+      warnings
+    };
+  }
+  const limitCurrency = rules.taxFreeLimitCurrency || 'EUR';
+  const limitEur = convertToEur(rules.taxFreeLimit, limitCurrency, rates);
+  if (limitEur == null) warnings.push('missingLimitRate');
+
+  const feeCurrency = rules.displayCurrency || settings.displayCurrency || 'EUR';
+  const customsFee = convertToEur(rules.customsFee, feeCurrency, rates);
+  const brokerFee = convertToEur(rules.brokerFee, feeCurrency, rates);
+  const domesticShipping = convertToEur(rules.domesticShipping, feeCurrency, rates);
+  if (customsFee == null || brokerFee == null || domesticShipping == null) warnings.push('missingFeeRate');
+
+  const overLimitAmount = Math.max(0, taxableBase - (limitEur ?? 0));
+  const importDuty = +(overLimitAmount * (Number(rules.importDutyRate) || 0) / 100).toFixed(2);
+  const vat = +((overLimitAmount + importDuty) * (Number(rules.vatRate) || 0) / 100).toFixed(2);
+  const fixedFees = (customsFee ?? 0) + (brokerFee ?? 0) + (domesticShipping ?? 0);
+  const estimatedTotalExtra = +(importDuty + vat + fixedFees).toFixed(2);
+
+  return {
+    enabled: true,
+    taxableBase,
+    overLimitAmount: +overLimitAmount.toFixed(2),
+    importDuty,
+    vat,
+    customsFee: +(customsFee ?? 0).toFixed(2),
+    brokerFee: +(brokerFee ?? 0).toFixed(2),
+    domesticShipping: +(domesticShipping ?? 0).toFixed(2),
+    estimatedTotalExtra,
+    estimatedGrandTotal: +(taxableBase + estimatedTotalExtra).toFixed(2),
+    warnings
+  };
 }

@@ -23,7 +23,7 @@ function callCallback(name, ...args) {
 export async function fetchRates(force = false) {
   const badge = document.getElementById('ratesBadge');
   const age = Date.now() - (state.ratesAt || 0);
-  if (!force && age < 4 * 3600 * 1000 && state.rates.JPY) { callCallback('showRatesBadge'); return; }
+  if (!force && age < 4 * 3600 * 1000 && state.rates.JPY && state.rates.UAH) { callCallback('showRatesBadge'); return; }
   
   if (badge) {
     badge.className = 'rates-badge loading'; 
@@ -31,13 +31,20 @@ export async function fetchRates(force = false) {
   }
   
   try {
-    const [usdRes, jpyRes] = await Promise.all([
+    const [usdRes, jpyRes, uahRes] = await Promise.all([
       fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json'),
-      fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/jpy.json')
+      fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/jpy.json'),
+      fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/uah.json')
     ]);
     const usdData = await usdRes.json();
     const jpyData = await jpyRes.json();
-    state.rates = { EUR: 1, USD: +(usdData.usd.eur).toFixed(6), JPY: +(jpyData.jpy.eur).toFixed(6) };
+    const uahData = await uahRes.json();
+    state.rates = {
+      EUR: 1,
+      USD: +(usdData.usd.eur).toFixed(6),
+      JPY: +(jpyData.jpy.eur).toFixed(6),
+      UAH: +(uahData.uah.eur).toFixed(6)
+    };
     state.ratesAt = Date.now(); 
     persist(); 
     callCallback('showRatesBadge'); 

@@ -5213,6 +5213,33 @@ video.modal-img {
   min-width: 0;
 }
 
+.entity-import-estimate {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .035);
+}
+
+.entity-import-estimate-title {
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.entity-import-estimate-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.entity-import-estimate-warning {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .entity-detail-modal {
   position: relative;
 }

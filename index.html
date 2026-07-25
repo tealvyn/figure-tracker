@@ -174,11 +174,11 @@
     <div class="analytics-forecast" id="analyticsForecast"></div>
     <div class="analytics-grid">
       <div class="chart-card donut">
-        <div class="chart-title" data-i18n="analytics.storeSpend">Траты по магазинам (€)</div>
+        <div class="chart-title" data-i18n="analytics.storeSpend">Траты по магазинам</div>
         <canvas id="storeChart"></canvas>
       </div>
       <div class="chart-card donut">
-        <div class="chart-title" data-i18n="analytics.makerSpend">Траты по производителям (€)</div>
+        <div class="chart-title" data-i18n="analytics.makerSpend">Траты по производителям</div>
         <canvas id="makerChart"></canvas>
       </div>
 
@@ -230,6 +230,14 @@
         <div class="breakdown-title" data-i18n="settings.defaults">Значения по умолчанию</div>
         <div class="form-grid" style="margin-top:10px;">
           <div class="form-group">
+            <div class="form-label" data-i18n="settings.countryProfile">Профиль страны</div>
+            <select id="sCountryProfile" onchange="saveSettings({ applyProfileDefaults: true })">
+              <option value="fi" data-i18n="settings.profileFi">Finland / EU</option>
+              <option value="ua" data-i18n="settings.profileUa">Ukraine</option>
+              <option value="custom" data-i18n="settings.profileCustom">Custom</option>
+            </select>
+          </div>
+          <div class="form-group">
             <div class="form-label" data-i18n="settings.region">Регион</div>
             <select id="sRegion" onchange="saveSettings()">
               <option value="Япония">Япония</option>
@@ -240,11 +248,21 @@
             </select>
           </div>
           <div class="form-group">
-            <div class="form-label" data-i18n="settings.currency">Валюта</div>
+            <div class="form-label" data-i18n="settings.mainCurrency">Основная валюта</div>
             <select id="sCurrency" onchange="saveSettings()">
               <option value="JPY">JPY</option>
               <option value="USD">USD</option>
               <option value="EUR">EUR</option>
+              <option value="UAH">UAH</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.displayCurrency">Валюта отображения</div>
+            <select id="sDisplayCurrency" onchange="saveSettings()">
+              <option value="EUR">EUR</option>
+              <option value="USD">USD</option>
+              <option value="JPY">JPY</option>
+              <option value="UAH">UAH</option>
             </select>
           </div>
           <div class="form-group">
@@ -274,6 +292,53 @@
             </select>
           </div>
         </div>
+      </div>
+
+      <div class="breakdown">
+        <div class="breakdown-title" data-i18n="settings.taxCustoms">Налоги и таможня</div>
+        <div class="form-grid" style="margin-top:10px;">
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.taxCalculationMode">Расчёт</div>
+            <select id="sTaxCalculationMode" onchange="saveSettings()">
+              <option value="off" data-i18n="settings.taxModeOff">Off</option>
+              <option value="manual" data-i18n="settings.taxModeManual">On</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.taxFreeLimit">Лимит без налога</div>
+            <input id="sTaxFreeLimit" type="number" step="0.01" min="0" value="150" oninput="saveSettings()" />
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.taxFreeLimitCurrency">Валюта лимита</div>
+            <select id="sTaxFreeLimitCurrency" onchange="saveSettings()">
+              <option value="EUR">EUR</option>
+              <option value="USD">USD</option>
+              <option value="JPY">JPY</option>
+              <option value="UAH">UAH</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.importDutyRate">Пошлина %</div>
+            <input id="sImportDutyRate" type="number" step="0.1" min="0" value="0" oninput="saveSettings()" />
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.vatRate">НДС %</div>
+            <input id="sVatRate" type="number" step="0.1" min="0" value="0" oninput="saveSettings()" />
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.customsFee">Комиссия таможни/перевозчика</div>
+            <input id="sCustomsFee" type="number" step="0.01" min="0" value="0" oninput="saveSettings()" />
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.brokerFee">Комиссия посредника</div>
+            <input id="sBrokerFee" type="number" step="0.01" min="0" value="0" oninput="saveSettings()" />
+          </div>
+          <div class="form-group">
+            <div class="form-label" data-i18n="settings.domesticShipping">Внутренняя доставка</div>
+            <input id="sDomesticShipping" type="number" step="0.01" min="0" value="0" oninput="saveSettings()" />
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px;" data-i18n="settings.taxDisclaimer">Расчёт примерный, правила и курс могут отличаться.</div>
       </div>
 
       <!-- Данные -->
@@ -468,9 +533,9 @@
           <select id="fScale"
             style="background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;width:100%;">
             <option value="" data-i18n="form.scaleEmpty">— не указано —</option>
-            <option value="small" data-i18n="form.scaleSmall">Мелкий (Нендо, Prize, PUP, 1/64) ~15€</option>
-            <option value="standard" data-i18n="form.scaleStandard">Стандарт (Scale 1/7, 1/6) ~25€</option>
-            <option value="large" data-i18n="form.scaleLarge">Большой (Scale 1/4, диорама) ~50€</option>
+            <option value="small" data-i18n="form.scaleSmall">Мелкий (Нендо, Prize, PUP, 1/64)</option>
+            <option value="standard" data-i18n="form.scaleStandard">Стандарт (Scale 1/7, 1/6)</option>
+            <option value="large" data-i18n="form.scaleLarge">Большой (Scale 1/4, диорама)</option>
           </select>
         </div>
         <div class="form-group">
@@ -563,13 +628,14 @@
                 <option value="EUR">EUR</option>
                 <option value="USD">USD</option>
                 <option value="JPY" selected>JPY</option>
+                <option value="UAH">UAH</option>
               </select>
             </div>
           </div>
           <div class="eur-preview" id="eurPreview"></div>
         </div>
         <div class="form-group">
-          <div class="form-label" data-i18n="form.shipping">Доставка EUR (весь заказ)</div>
+          <div class="form-label" id="fShippingLabel">Доставка EUR (весь заказ)</div>
           <div class="shipping-row" style="display:flex;gap:8px;align-items:center;">
             <input id="fShipping" type="number" step="0.01" placeholder="авто" data-i18n-placeholder="form.shippingHint"
               style="flex:2;min-width:0;background:#0d1018;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font:inherit;font-size:13px;" />
@@ -585,7 +651,7 @@
           <div class="eur-preview" style="color:var(--muted)" data-i18n="form.shippingHint">Общая на весь заказ</div>
         </div>
         <div class="form-group">
-          <div class="form-label" data-i18n="form.deposit">Предоплата EUR (весь заказ)</div>
+          <div class="form-label" id="fDepositLabel">Предоплата EUR (весь заказ)</div>
           <input id="fDeposit" type="number" step="0.01" placeholder="0.00" />
         </div>
         <div class="form-group full">
@@ -693,6 +759,7 @@
             <option value="JPY" selected>JPY</option>
             <option value="USD">USD</option>
             <option value="EUR">EUR</option>
+            <option value="UAH">UAH</option>
           </select>
         </div>
         <div class="form-group">

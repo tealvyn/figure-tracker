@@ -1,6 +1,6 @@
 ﻿// js/ui.js
-import { state, appState, persist, schedulePersist, toEur, buildChangeHistoryComments, appendSystemHistoryComments, addSystemHistoryComment } from './state.js';
-import { H, eur, calcAmiAmiShipping, calcOrder, SCALE_WEIGHTS } from './utils.js';
+import { state, appState, persist, schedulePersist, toEur, buildChangeHistoryComments, appendSystemHistoryComments, addSystemHistoryComment, getCountryProfile, getCountryProfileId, getDefaultCurrency, getDefaultRegion, getDefaultShipMethod, getDisplayCurrency, getProfileRegions, getProfileShippingMethods, getRegionalRules, getRegionalRuleProfile } from './state.js';
+import { H, eur, fromEur, toBaseEur, calcAmiAmiShipping, calcOrder, SCALE_WEIGHTS, calculateImportEstimate } from './utils.js';
 import * as API from './api.js';
 import { applyI18n, t } from './i18n.js';
 import { downloadJsonBackup } from './data-portability.js';
@@ -22,6 +22,130 @@ import { buildSearchText, formatReleaseDate, mergeTags, normalizeProductMeta, re
 const GALLERY_PAGE_SIZE = 120;
 const renderQueue = new Map();
 let renderScheduled = false;
+
+const CURRENCY_OPTIONS = ['EUR', 'USD', 'JPY', 'UAH'];
+
+function setSelectOptions(selectOrId, options, selectedValue) {
+  const select = typeof selectOrId === 'string' ? document.getElementById(selectOrId) : selectOrId;
+  if (!select) return;
+  const current = selectedValue ?? select.value;
+  select.innerHTML = (options || []).map(option => {
+    const value = typeof option === 'string' ? option : option.value;
+    const label = typeof option === 'string' ? option : option.label;
+    return `<option value="${H(value)}">${H(label)}</option>`;
+  }).join('');
+  if (current && ![...select.options].some(option => option.value === current)) {
+    select.insertAdjacentHTML('afterbegin', `<option value="${H(current)}">${H(current)}</option>`);
+  }
+  select.value = current || select.options[0]?.value || '';
+}
+
+function getActiveProfileDefaults(settings = state.settings || {}) {
+  const profileId = getCountryProfileId(settings);
+  const profile = getCountryProfile(profileId);
+  return {
+    profileId,
+    profile,
+    currency: getDefaultCurrency(settings),
+    displayCurrency: getDisplayCurrency(settings),
+    region: getDefaultRegion(settings),
+    shipMethod: getDefaultShipMethod(settings)
+  };
+}
+
+function refreshRegionalSelects(selected = {}) {
+  const s = state.settings || {};
+  const defaults = getActiveProfileDefaults(s);
+  const regions = getProfileRegions(s);
+  const methods = getProfileShippingMethods(s);
+  setSelectOptions('sRegion', regions, selected.region ?? defaults.region);
+  setSelectOptions('fRegion', regions, selected.region ?? document.getElementById('fRegion')?.value ?? defaults.region);
+  setSelectOptions('sShipMethod', methods, selected.shipMethod ?? defaults.shipMethod);
+  setSelectOptions('fShipMethod', methods, selected.shipMethod ?? document.getElementById('fShipMethod')?.value ?? defaults.shipMethod);
+  setSelectOptions('sCurrency', CURRENCY_OPTIONS, selected.currency ?? defaults.currency);
+  setSelectOptions('fCurrency', CURRENCY_OPTIONS, selected.currency ?? document.getElementById('fCurrency')?.value ?? defaults.currency);
+  setSelectOptions('wCurrency', CURRENCY_OPTIONS, selected.currency ?? document.getElementById('wCurrency')?.value ?? defaults.currency);
+  setSelectOptions('sDisplayCurrency', CURRENCY_OPTIONS, selected.displayCurrency ?? defaults.displayCurrency);
+  setSelectOptions('sCountryProfile', [
+    { value: 'fi', label: t('settings.profileFi') },
+    { value: 'ua', label: t('settings.profileUa') },
+    { value: 'custom', label: t('settings.profileCustom') }
+  ], selected.countryProfile ?? defaults.profileId);
+}
+
+function formatDisplayMoneyFromEur(amountEur) {
+  return eur(amountEur);
+}
+
+function syncFormMoneyCurrency() {
+  const currency = getDisplayCurrency();
+  const shippingLabel = document.getElementById('fShippingLabel');
+  const depositLabel = document.getElementById('fDepositLabel');
+  if (shippingLabel) shippingLabel.textContent = `Доставка ${currency} (весь заказ)`;
+  if (depositLabel) depositLabel.textContent = `Предоплата ${currency} (весь заказ)`;
+}
+
+function setFormBaseEurValue(id, amountEur) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  const amount = Number(amountEur) || 0;
+  input.value = amount ? fromEur(amount, getDisplayCurrency()).toFixed(2) : '';
+}
+
+function getFormBaseEurValue(id) {
+  const amount = parseFloat(document.getElementById(id)?.value) || 0;
+  return +toBaseEur(amount, getDisplayCurrency()).toFixed(2);
+}
+
+function eurToDisplayAmount(amountEur) {
+  const currency = getDisplayCurrency();
+  const amount = Number(amountEur) || 0;
+  if (currency === 'EUR') return amount;
+  const rate = Number(state.rates?.[currency]) || 0;
+  return rate ? amount / rate : amount;
+}
+
+function readNumberInput(id, fallback = 0) {
+  const value = Number(document.getElementById(id)?.value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function refreshRegionalRuleFields(rules = getRegionalRules()) {
+  setSelectOptions('sTaxFreeLimitCurrency', CURRENCY_OPTIONS, rules.taxFreeLimitCurrency || 'EUR');
+  setSelectOptions('sTaxCalculationMode', [
+    { value: 'off', label: t('settings.taxModeOff') },
+    { value: 'manual', label: t('settings.taxModeManual') }
+  ], rules.taxCalculationMode || 'off');
+  const values = {
+    sTaxFreeLimit: rules.taxFreeLimit,
+    sImportDutyRate: rules.importDutyRate,
+    sVatRate: rules.vatRate,
+    sCustomsFee: rules.customsFee,
+    sBrokerFee: rules.brokerFee,
+    sDomesticShipping: rules.domesticShipping
+  };
+  for (const [id, value] of Object.entries(values)) {
+    const el = document.getElementById(id);
+    if (el) el.value = value ?? 0;
+  }
+}
+
+function collectRegionalRules(profileDefaults = null) {
+  const current = getRegionalRules();
+  const base = profileDefaults || current;
+  return {
+    countryProfile: base.countryProfile || getCountryProfileId(),
+    displayCurrency: base.displayCurrency || getDisplayCurrency(),
+    taxFreeLimit: profileDefaults ? base.taxFreeLimit : readNumberInput('sTaxFreeLimit', base.taxFreeLimit),
+    taxFreeLimitCurrency: profileDefaults ? base.taxFreeLimitCurrency : (document.getElementById('sTaxFreeLimitCurrency')?.value || base.taxFreeLimitCurrency || 'EUR'),
+    importDutyRate: profileDefaults ? base.importDutyRate : readNumberInput('sImportDutyRate', base.importDutyRate),
+    vatRate: profileDefaults ? base.vatRate : readNumberInput('sVatRate', base.vatRate),
+    customsFee: profileDefaults ? base.customsFee : readNumberInput('sCustomsFee', base.customsFee),
+    brokerFee: profileDefaults ? base.brokerFee : readNumberInput('sBrokerFee', base.brokerFee),
+    domesticShipping: profileDefaults ? base.domesticShipping : readNumberInput('sDomesticShipping', base.domesticShipping),
+    taxCalculationMode: profileDefaults ? base.taxCalculationMode : (document.getElementById('sTaxCalculationMode')?.value || base.taxCalculationMode || 'off')
+  };
+}
 const mediaLookup = new Map();
 const STANDALONE_TABS = new Set(['gallery', 'calendar', 'analytics', 'shelf', 'settings']);
 let gallerySliderTimer = null;
@@ -675,13 +799,13 @@ export function setGlobalSearch(value) {
 export function showRatesBadge() {
   const badge = document.getElementById('ratesBadge');
   if (!badge) return;
-  const { USD, JPY } = state.rates;
+  const { USD, JPY, UAH } = state.rates;
   const age = Date.now() - (state.ratesAt || 0);
   const mins = Math.floor(age / 60000);
   const timeStr = mins < 1 ? 'только что' : mins < 60 ? `${mins} мин назад` : `${Math.floor(mins / 60)} ч назад`;
   badge.className = 'rates-badge';
   badge.title = `Обновлено: ${timeStr}`;
-  badge.textContent = `1 USD = ${USD?.toFixed(4) ?? '???'} · 1 JPY = ${JPY?.toFixed(5) ?? '???'} · ${timeStr}`;
+  badge.textContent = `1 USD = ${USD?.toFixed(4) ?? '???'} · 1 JPY = ${JPY?.toFixed(5) ?? '???'} · 1 UAH = ${UAH?.toFixed(5) ?? '???'} · ${timeStr}`;
 }
 
 const LOCAL_BACKUPS_KEY = 'fctV2LocalBackups';
@@ -823,7 +947,7 @@ export function updateEurPreview() {
   if (!amount || currency === 'EUR') { preview.textContent = ''; return; }
   const e = toEur(amount, currency);
   const rate = state.rates[currency];
-  preview.textContent = `${amount} ${currency} × ${rate?.toFixed(currency === 'JPY' ? 5 : 4)} = €${e}`;
+  preview.textContent = `${amount} ${currency} × ${rate?.toFixed(currency === 'JPY' ? 5 : 4)} = ${eur(e)}`;
 }
 
 export function estimateShipping() {
@@ -836,6 +960,7 @@ export function estimateShipping() {
   const region = document.getElementById('fRegion').value;
   const isEU = region === 'ЕС';
   const method = document.getElementById('fShipMethod').value;
+  const countryProfile = getCountryProfileId();
   const orderItems = state.items.filter(i => i.orderNumber === orderNumber && i.id !== (appState.editingId || ''));
   const totalKg = orderItems.reduce((sum, i) => sum + (SCALE_WEIGHTS[i.scale || 'small']?.kg || 0.8), 0) + (SCALE_WEIGHTS[scale]?.kg || 0.8);
   const note = orderItems.length >= 1 ? ` · сборная ${orderItems.length + 1} шт, ~${totalKg.toFixed(1)}кг` : ` · ~${totalKg.toFixed(1)}кг`;
@@ -845,19 +970,28 @@ export function estimateShipping() {
   if (method === 'sal' && totalKg > 2.0) { usedMethod = 'ems'; toast('⚠️ SAL недоступен свыше 2кг — переключено на EMS'); }
 
   let resultEur;
-  if (isEU) {
+  const ukrainianMethods = ['nova_poshta', 'ukrposhta', 'meest', 'proxy'];
+  if (countryProfile === 'ua' && ukrainianMethods.includes(usedMethod)) {
+    const profile = getCountryProfile('ua');
+    const estimateUah = Math.max(0, Number(profile.defaultShippingAmount) || 150);
+    resultEur = toBaseEur(estimateUah, 'UAH');
+    toast(`📦 ${methodNameOf(usedMethod)}: ~${estimateUah.toFixed(0)} грн${note}`);
+  } else if (isEU) {
     resultEur = Math.max(8, Math.round(totalKg * 3));
-    toast(`📦 ЕС доставка: ~€${resultEur}${note}`);
+    toast(`📦 ЕС доставка: ~${eur(resultEur)}${note}`);
   } else if (isOrzGK) {
     resultEur = Math.max(15, Math.round(totalKg * 5.5 * 1.2));
-    toast(`📦 OrzGK Special Line: ~€${resultEur}${note}`);
+    toast(`📦 OrzGK Special Line: ~${eur(resultEur)}${note}`);
   } else {
     const jpy = calcAmiAmiShipping(totalKg, usedMethod);
     resultEur = Math.round(jpy * (state.rates['JPY'] || 0.006));
-    const methodName = { small_packet: 'Small Packet', sal: 'SAL', ems: 'EMS', surface: 'Surface' }[usedMethod];
-    toast(`📦 ${methodName}: ~${jpy.toLocaleString()} JPY ≈ €${resultEur}${note}`);
+    toast(`📦 ${methodNameOf(usedMethod)}: ~${jpy.toLocaleString()} JPY ≈ ${eur(resultEur)}${note}`);
   }
-  document.getElementById('fShipping').value = resultEur.toFixed(2);
+  setFormBaseEurValue('fShipping', resultEur);
+}
+
+function methodNameOf(method) {
+  return { small_packet: 'Small Packet', sal: 'SAL', ems: 'EMS', surface: 'Surface', dhl: 'DHL', fedex: 'FedEx', nova_poshta: 'Новая Почта', ukrposhta: 'Укрпошта', meest: 'Meest', proxy: 'Посредник', other: 'Другое' }[method] || method;
 }
 
 export function getOrders() {
@@ -1086,12 +1220,12 @@ export function renderDetail() {
   </div>
 
   <div class="breakdown fade-in" style="animation-delay:160ms">
-    <div class="breakdown-title">Расчёт налогов · Финляндия (ALV 25.5%)</div>
+    <div class="breakdown-title">Расчёт</div>
     <div class="summary-row"><span>📦 Товары</span><span>${eur(c.goodsEur)}</span></div>
     <div class="summary-row"><span>🚚 Доставка</span><span>${eur(c.shippingEur)}</span></div>
     <div class="summary-row"><span>📊 База для налога</span><span>${eur(c.taxBase)}</span></div>
-    <div class="summary-row"><span>🇫🇮 ALV 25.5%</span><span>${c.isEU ? '<span style="color:var(--green)">0 — ЕС</span>' : eur(c.alv)}</span></div>
-    <div class="summary-row"><span>🏛️ Таможня (4.7%)</span><span>${c.isEU ? '<span style="color:var(--green)">0 — ЕС</span>' : c.taxBase <= 150 ? '<span style="color:var(--green)">0 — ≤150€</span>' : eur(c.customs)}</span></div>
+    <div class="summary-row"><span>НДС</span><span>${c.isDomestic ? '<span style="color:var(--green)">0 — внутри страны</span>' : eur(c.alv)}</span></div>
+    <div class="summary-row"><span>Таможня</span><span>${c.isDomestic ? '<span style="color:var(--green)">0 — внутри страны</span>' : c.overLimitAmount <= 0 ? '<span style="color:var(--green)">0 — в пределах лимита</span>' : eur(c.customs)}</span></div>
     <div class="summary-row"><span>💳 Предоплата</span><span>-${eur(c.deposit)}</span></div>
     <div class="summary-row" style="font-weight:800; font-size: 16px; margin-top:10px;"><span>💰 Итого к оплате</span><span>${eur(c.remaining)}</span></div>
   </div>
@@ -1122,12 +1256,15 @@ export function closeForm() {
 }
 
 export function clearForm() {
+  refreshRegionalSelects();
+  syncFormMoneyCurrency();
   ['fName', 'fOrder', 'fOrderName', 'fStore', 'fImg', 'fShopUrl', 'fPrice', 'fShipping', 'fDeposit', 'fMaker', 'fDateYear', 'fTags', 'fTracking', 'fOrderDate', 'fShipDate', 'fScale', 'fJan', 'fSku', 'fPreorderStart', 'fPreorderEnd', 'fSource', 'fSourceUrl'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  document.getElementById('fCurrency').value = 'JPY';
-  document.getElementById('fRegion').value = 'Япония';
+  const defaults = getActiveProfileDefaults();
+  document.getElementById('fCurrency').value = defaults.currency;
+  document.getElementById('fRegion').value = defaults.region;
   document.getElementById('fStatus').value = 'Не оплачено';
   if (document.getElementById('fReleaseStatus')) document.getElementById('fReleaseStatus').value = 'unknown';
   document.getElementById('eurPreview').textContent = '';
@@ -1135,12 +1272,9 @@ export function clearForm() {
   document.getElementById('formTitle').textContent = t('form.addFigure');
   document.getElementById('fTracking').value = '';
   document.getElementById('fDateMonth').value = '';
-  document.getElementById('fShipMethod').value = 'small_packet';
+  document.getElementById('fShipMethod').value = defaults.shipMethod;
   const s = state.settings || {};
-  if (s.region) document.getElementById('fRegion').value = s.region;
-  if (s.currency) document.getElementById('fCurrency').value = s.currency;
   if (s.store) document.getElementById('fStore').value = s.store;
-  if (s.shipMethod) document.getElementById('fShipMethod').value = s.shipMethod;
   renderTagSuggestions();
 }
 
@@ -1156,6 +1290,11 @@ export function addToOrder(orderNum, orderName, store, region) {
 export function editItem(id) {
   const rawItem = state.items.find(i => i.id === id);
   if (!rawItem) return;
+  refreshRegionalSelects({
+    region: rawItem.region || undefined,
+    currency: rawItem.currency || undefined,
+    shipMethod: rawItem.shipMethod || undefined
+  });
   const item = normalizeProductMeta(rawItem);
   appState.editingId = id;
   appState.pendingUploadedMedia = [];
@@ -1163,7 +1302,7 @@ export function editItem(id) {
   document.getElementById('fOrder').value = item.orderNumber || '';
   document.getElementById('fOrderName').value = item.orderName || '';
   document.getElementById('fStore').value = item.store || '';
-  document.getElementById('fRegion').value = item.region || 'Япония';
+  document.getElementById('fRegion').value = item.region || getDefaultRegion();
   document.getElementById('fMaker').value = item.manufacturer || '';
   const _formattedRelease = formatReleaseDate(item.releaseDate || '');
   const _dp = _formattedRelease.split(' ');
@@ -1171,15 +1310,16 @@ export function editItem(id) {
   document.getElementById('fDateYear').value = _dp[1] || '';
   document.getElementById('fTracking').value = item.tracking || '';
   document.getElementById('fScale').value = item.scale || '';
-  document.getElementById('fShipMethod').value = item.shipMethod || 'small_packet';
+  document.getElementById('fShipMethod').value = item.shipMethod || getDefaultShipMethod();
   document.getElementById('fOrderDate').value = item.orderDate || '';
   document.getElementById('fShipDate').value = item.shipDate || '';
   document.getElementById('fImg').value = mediaUrlsOf(item).join(', ');
   document.getElementById('fShopUrl').value = item.shopUrl || '';
   document.getElementById('fPrice').value = item.priceOriginal || '';
-  document.getElementById('fCurrency').value = item.currency || 'JPY';
-  document.getElementById('fShipping').value = item.shippingEur || '';
-  document.getElementById('fDeposit').value = item.deposit || '';
+  document.getElementById('fCurrency').value = item.currency || getDefaultCurrency();
+  syncFormMoneyCurrency();
+  setFormBaseEurValue('fShipping', item.shippingEur);
+  setFormBaseEurValue('fDeposit', item.deposit);
   document.getElementById('fStatus').value = item.status || 'Не оплачено';
   document.getElementById('fTags').value = (item.tags || []).join(', ');
   document.getElementById('fJan').value = item.jan || '';
@@ -1275,8 +1415,8 @@ export function saveItem() {
     sourceUrl: document.getElementById('fSourceUrl')?.value.trim() || '',
     priceOriginal: parseFloat(document.getElementById('fPrice').value) || 0,
     currency: document.getElementById('fCurrency').value,
-    shippingEur: parseFloat(document.getElementById('fShipping').value) || 0,
-    deposit: parseFloat(document.getElementById('fDeposit').value) || 0,
+    shippingEur: getFormBaseEurValue('fShipping'),
+    deposit: getFormBaseEurValue('fDeposit'),
     status: document.getElementById('fStatus').value,
     tags: document.getElementById('fTags').value.split(',').map(t => t.trim()).filter(Boolean),
     rateAtSave: state.rates[document.getElementById('fCurrency').value] ?? 1,
@@ -1304,10 +1444,16 @@ export function saveItem() {
 
 export function loadSettings() {
   const s = state.settings || {};
-  document.getElementById('sRegion').value = s.region || 'Япония';
-  document.getElementById('sCurrency').value = s.currency || 'JPY';
+  syncFormMoneyCurrency();
+  refreshRegionalSelects({
+    countryProfile: getCountryProfileId(s),
+    region: getDefaultRegion(s),
+    currency: getDefaultCurrency(s),
+    displayCurrency: getDisplayCurrency(s),
+    shipMethod: getDefaultShipMethod(s)
+  });
+  refreshRegionalRuleFields(getRegionalRules(s));
   document.getElementById('sStore').value = s.store || '';
-  document.getElementById('sShipMethod').value = s.shipMethod || 'small_packet';
   if (document.getElementById('sDensity')) document.getElementById('sDensity').value = s.density || 'compact';
   if (document.getElementById('sTheme')) document.getElementById('sTheme').value = s.theme || 'cyberpunk';
   applyUiDensity();
@@ -1326,13 +1472,37 @@ export function loadSettings() {
   renderLocalBackups();
 }
 
-export function saveSettings() {
+export function saveSettings(options = {}) {
   const existingTags = getAllTags();
+  const previousSettings = state.settings || {};
+  const countryProfile = document.getElementById('sCountryProfile')?.value || getCountryProfileId(previousSettings);
+  const profileChanged = countryProfile !== getCountryProfileId(previousSettings);
+  const profile = getCountryProfile(countryProfile);
+  const applyProfileDefaults = countryProfile !== 'custom' && (profileChanged || options.applyProfileDefaults);
+  const profileDefaults = applyProfileDefaults
+    ? {
+      region: profile.defaultRegion,
+      currency: profile.defaultCurrency,
+      displayCurrency: profile.displayCurrency,
+      shipMethod: profile.shippingMethods[0]?.value || 'small_packet'
+    }
+    : null;
+  const displayCurrency = profileDefaults?.displayCurrency || document.getElementById('sDisplayCurrency')?.value || getDisplayCurrency(previousSettings);
+  const regionalRuleDefaults = applyProfileDefaults ? getRegionalRuleProfile(countryProfile) : null;
+  const regionalRules = collectRegionalRules(regionalRuleDefaults);
+  regionalRules.countryProfile = countryProfile;
+  regionalRules.displayCurrency = displayCurrency;
   state.settings = {
-    region: document.getElementById('sRegion').value,
-    currency: document.getElementById('sCurrency').value,
+    ...previousSettings,
+    countryProfile,
+    region: profileDefaults?.region || document.getElementById('sRegion').value,
+    currency: profileDefaults?.currency || document.getElementById('sCurrency').value,
+    defaultCurrency: profileDefaults?.currency || document.getElementById('sCurrency').value,
+    defaultRegion: profileDefaults?.region || document.getElementById('sRegion').value,
+    displayCurrency,
+    regionalRules,
     store: document.getElementById('sStore').value,
-    shipMethod: document.getElementById('sShipMethod').value,
+    shipMethod: profileDefaults?.shipMethod || document.getElementById('sShipMethod').value,
     density: document.getElementById('sDensity')?.value || state.settings?.density || 'compact',
     theme: document.getElementById('sTheme')?.value || state.settings?.theme || 'cyberpunk',
     tags: existingTags,
@@ -1343,6 +1513,16 @@ export function saveSettings() {
   };
   applyUiDensity();
   persist();
+  refreshRegionalSelects({
+    countryProfile: state.settings.countryProfile,
+    region: state.settings.region,
+    currency: state.settings.currency,
+    displayCurrency: state.settings.displayCurrency,
+    shipMethod: state.settings.shipMethod
+  });
+  refreshRegionalRuleFields(state.settings.regionalRules);
+  syncFormMoneyCurrency();
+  renderAnalytics();
 }
 
 export function clearAllData() {
@@ -1417,7 +1597,7 @@ export function renderShelfChart() {
       ${[['📦 Получено', shelfValue, '#a78bfa'], ['🚚 В пути', inTransitValue, '#4ade80'], ['✅ Оплачено', prepaidValue, '#67e8f9'], ['💳 Депозит', depositValue, '#fbbf24'], ['⏳ Не оплачено', unpaidValue, '#f87171']].map(([label, val, color]) => `
         <div style="display:flex;justify-content:space-between;">
           <span style="color:${color}">${label}</span>
-          <span style="color:${color}">€${val.toFixed(2)} · ${pct(val)}%</span>
+          <span style="color:${color}">${eur(val)} · ${pct(val)}%</span>
         </div>`).join('')}
     </div>
     <div style="height:28px;border-radius:14px;overflow:hidden;display:flex;gap:2px;">
@@ -1428,8 +1608,8 @@ export function renderShelfChart() {
       ${unpaidValue ? `<div style="width:${pct(unpaidValue)}%;background:#f87171;border-radius:0 14px 14px 0;"></div>` : ''}
     </div>
     <div style="display:flex;justify-content:space-between;margin-top:12px;font-size:13px;color:var(--muted);">
-      <span>Коллекция дома: <strong style="color:#a78bfa;">€${shelfValue.toFixed(2)}</strong></span>
-      <span>Ещё потратить: <strong style="color:#f87171;">€${(depositValue + unpaidValue).toFixed(2)}</strong></span>
+      <span>Коллекция дома: <strong style="color:#a78bfa;">${eur(shelfValue)}</strong></span>
+      <span>Ещё потратить: <strong style="color:#f87171;">${eur(depositValue + unpaidValue)}</strong></span>
     </div>`;
 }
 
@@ -1439,6 +1619,10 @@ export function renderAnalytics() {
   const received = state.items.filter(i => i.status === 'Получено');
   const inTransit = state.items.filter(i => i.status === 'В пути');
   const unpaid = state.items.filter(i => i.status === 'Не оплачено' || i.status === 'Депозит оплачен');
+  const displayCurrency = getDisplayCurrency();
+  const importEstimates = state.items.map(item => calculateImportEstimate(item, { ...(state.settings || {}), regionalRules: getRegionalRules() }, state.rates));
+  const importExtraTotal = importEstimates.reduce((sum, estimate) => sum + (estimate.enabled ? estimate.estimatedTotalExtra : 0), 0);
+  const importGrandTotal = totals.total + importExtraTotal;
   const topStore = Object.entries(state.items.reduce((acc, i) => {
     const key = i.store || '—';
     acc[key] = (acc[key] || 0) + getItemTotalEur(i);
@@ -1448,27 +1632,30 @@ export function renderAnalytics() {
   const summaryEl = document.getElementById('analyticsSummary');
   if (summaryEl) {
     summaryEl.innerHTML = `
-      <div class="analytics-kpi"><span>Всего</span><strong>${eur(totals.total)}</strong><small>${orders.length} заказов · ${state.items.length} фигурок</small></div>
-      <div class="analytics-kpi"><span>На полке</span><strong>${received.length}</strong><small>${eur(received.reduce((s, i) => s + getItemTotalEur(i), 0))}</small></div>
+      <div class="analytics-kpi"><span>Всего</span><strong>${formatDisplayMoneyFromEur(totals.total)}</strong><small>${orders.length} заказов · ${state.items.length} фигурок</small></div>
+      <div class="analytics-kpi"><span>На полке</span><strong>${received.length}</strong><small>${formatDisplayMoneyFromEur(received.reduce((s, i) => s + getItemTotalEur(i), 0))}</small></div>
       <div class="analytics-kpi"><span>В пути</span><strong>${inTransit.length}</strong><small>${inTransit.length ? 'ждёт получения' : 'ничего не едет'}</small></div>
-      <div class="analytics-kpi"><span>Осталось</span><strong>${eur(totals.remaining)}</strong><small>${unpaid.length} позиций требуют денег</small></div>
-      <div class="analytics-kpi"><span>Топ магазин</span><strong>${H(topStore?.[0] || '—')}</strong><small>${topStore ? eur(topStore[1]) : 'нет данных'}</small></div>`;
+      <div class="analytics-kpi"><span>Осталось</span><strong>${formatDisplayMoneyFromEur(totals.remaining)}</strong><small>${unpaid.length} позиций требуют денег</small></div>
+      <div class="analytics-kpi"><span>Топ магазин</span><strong>${H(topStore?.[0] || '—')}</strong><small>${topStore ? formatDisplayMoneyFromEur(topStore[1]) : 'нет данных'}</small></div>
+      ${importExtraTotal ? `<div class="analytics-kpi"><span>${t('analytics.importExtras')}</span><strong>${formatDisplayMoneyFromEur(importExtraTotal)}</strong><small>${t('analytics.importGrandTotal')}: ${formatDisplayMoneyFromEur(importGrandTotal)}</small></div>` : ''}
+      <div class="analytics-kpi"><span>${t('analytics.baseCurrency', { currency: 'EUR' })}</span><strong>${displayCurrency}</strong><small>${t('analytics.displayCurrency', { currency: displayCurrency })}</small></div>`;
   }
 
   const forecastEl = document.getElementById('analyticsForecast');
   if (forecastEl) {
     const upcoming = state.items.filter(i => i.status !== 'Получено' && i.releaseDate).sort((a, b) => releaseSortValue(a) - releaseSortValue(b)).slice(0, 6);
-    forecastEl.innerHTML = `<div class="analytics-forecast-title">Ближайший план</div>${upcoming.length ? upcoming.map(i => `<button onclick="openEntityDetail('collection','${H(i.id)}')"><span>${H(i.releaseDate || '—')}</span><strong>${H(i.name)}</strong><em>${eur(getItemTotalEur(i))}</em></button>`).join('') : '<div class="dashboard-empty">Нет будущих релизов</div>'}`;
+    forecastEl.innerHTML = `<div class="analytics-forecast-title">Ближайший план</div>${upcoming.length ? upcoming.map(i => `<button onclick="openEntityDetail('collection','${H(i.id)}')"><span>${H(i.releaseDate || '—')}</span><strong>${H(i.name)}</strong><em>${formatDisplayMoneyFromEur(getItemTotalEur(i))}</em></button>`).join('') : '<div class="dashboard-empty">Нет будущих релизов</div>'}`;
   }
 
   if (typeof Chart === 'undefined') return;
   const storeData = {}; const makerData = {};
   state.items.forEach(i => {
     const eur = toEur(i.priceOriginal || 0, i.currency || 'EUR');
+    const displayValue = eurToDisplayAmount(eur);
     const store = i.store || 'Неизвестно';
     const maker = i.manufacturer || 'Неизвестно';
-    storeData[store] = (storeData[store] || 0) + eur;
-    makerData[maker] = (makerData[maker] || 0) + eur;
+    storeData[store] = (storeData[store] || 0) + displayValue;
+    makerData[maker] = (makerData[maker] || 0) + displayValue;
   });
   const createChart = (canvasId, instance, dataObj, colorScheme) => {
     if (instance) instance.destroy();
@@ -1496,12 +1683,13 @@ export function renderAnalytics() {
     }
     if (mIdx < 0) return;
     const eurVal = toEur(i.priceOriginal || 0, i.currency || 'EUR');
-    if (i.status === 'Полностью оплачено' || i.status === 'Получено') monthsPaid[mIdx] += eurVal; else monthsUnpaid[mIdx] += eurVal;
+    const displayValue = eurToDisplayAmount(eurVal);
+    if (i.status === 'Полностью оплачено' || i.status === 'Получено') monthsPaid[mIdx] += displayValue; else monthsUnpaid[mIdx] += displayValue;
   });
 
   if (appState.monthChartInstance) appState.monthChartInstance.destroy();
   const ctxM = document.getElementById('monthChart').getContext('2d');
-  appState.monthChartInstance = new Chart(ctxM, { type: 'bar', data: { labels: MONTH_NAMES, datasets: [{ label: 'Оплачено', data: monthsPaid.map(v => v.toFixed(2)), backgroundColor: '#4ade8088', borderColor: '#4ade80', borderWidth: 1, borderRadius: 6 }, { label: 'Не оплачено', data: monthsUnpaid.map(v => v.toFixed(2)), backgroundColor: '#67e8f988', borderColor: '#67e8f9', borderWidth: 1, borderRadius: 6 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, ticks: { color: '#8899aa' }, grid: { color: '#ffffff11' } }, y: { stacked: true, ticks: { color: '#8899aa', callback: v => `€${v}` }, grid: { color: '#ffffff11' } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: €${ctx.parsed.y}` } } } } });
+  appState.monthChartInstance = new Chart(ctxM, { type: 'bar', data: { labels: MONTH_NAMES, datasets: [{ label: 'Оплачено', data: monthsPaid.map(v => v.toFixed(2)), backgroundColor: '#4ade8088', borderColor: '#4ade80', borderWidth: 1, borderRadius: 6 }, { label: 'Не оплачено', data: monthsUnpaid.map(v => v.toFixed(2)), backgroundColor: '#67e8f988', borderColor: '#67e8f9', borderWidth: 1, borderRadius: 6 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true, ticks: { color: '#8899aa' }, grid: { color: '#ffffff11' } }, y: { stacked: true, ticks: { color: '#8899aa', callback: v => `${v} ${displayCurrency}` }, grid: { color: '#ffffff11' } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y} ${displayCurrency}` } } } } });
 }
 
 export function payWholeOrder(orderNumber) {
@@ -1724,7 +1912,7 @@ grid.innerHTML = visibleItems.map((item, idx) => {
   const meta = [
     item.store,
     item.status,
-    priceEur ? `€${priceEur.toFixed(2)}` : ''
+    priceEur ? eur(priceEur) : ''
   ].filter(Boolean).map(H).join(' · ');
 
   return `<div class="gallery-card animate-in" ${imgs.length > 1 ? `data-gallery-slider="true" data-item-id="${H(item.id)}" data-current-index="0"` : ''} style="animation-delay:${idx * 20}ms;" onclick="if(isCardOpenBlocked(event))return;openEntityDetail('collection','${H(item.id)}')">
@@ -1782,7 +1970,7 @@ export function updateBanner(advance = false) {
   if (!banner) return;
   if (typeof appState.currentTab !== 'undefined' && appState.currentTab !== 'collection') { banner.style.display = 'none'; return; }
   const data = state.bannerData || {}; const notices = [];
-  if (data.unpaidItems?.length) notices.push({ type: 'unpaid', text: `💰 Не оплачено ${data.unpaidItems.length} шт. на €${data.unpaidTotal.toFixed(2)}` });
+  if (data.unpaidItems?.length) notices.push({ type: 'unpaid', text: `💰 Не оплачено ${data.unpaidItems.length} шт. на ${eur(data.unpaidTotal)}` });
   if (data.upcoming?.length) notices.push({ type: 'upcoming', text: `🔔 Скоро выходят: ${data.upcoming.slice(0, 3).map(i => `${H(i.name)} (${H(i.releaseDate)})`).join(' • ')}` });
   if (data.inTransit?.length) notices.push({ type: 'transit', text: `🚚 В пути: ${data.inTransit.length} фигурок` });
   if (data.stats) notices.push({ type: 'stats', text: `📦 Коллекция: ${data.stats.totalItems} фигурок · дома ${data.stats.received} · в вишлисте ${data.stats.wishlist}` });
@@ -2135,6 +2323,40 @@ function productDetailLink(label, url, text = '') {
   return productDetailRow(label, `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${H(text || url)}</a>`, true);
 }
 
+function importWarningText(warning) {
+  return {
+    missingAmount: t('importEstimate.warningMissingAmount'),
+    missingItemRate: t('importEstimate.warningMissingRate'),
+    missingLimitRate: t('importEstimate.warningMissingRate'),
+    missingFeeRate: t('importEstimate.warningMissingRate')
+  }[warning] || warning;
+}
+
+function buildImportEstimateBlock(item) {
+  const settings = { ...(state.settings || {}), regionalRules: getRegionalRules() };
+  const rules = settings.regionalRules;
+  const estimate = calculateImportEstimate(item, settings, state.rates);
+  if (!estimate.enabled) return '';
+  const rows = [
+    productDetailRow(t('importEstimate.taxableBase'), formatDisplayMoneyFromEur(estimate.taxableBase)),
+    productDetailRow(t('importEstimate.limit'), `${rules.taxFreeLimit || 0} ${rules.taxFreeLimitCurrency || 'EUR'}`),
+    productDetailRow(t('importEstimate.overLimit'), formatDisplayMoneyFromEur(estimate.overLimitAmount)),
+    productDetailRow(t('importEstimate.importDuty'), formatDisplayMoneyFromEur(estimate.importDuty)),
+    productDetailRow(t('importEstimate.vat'), formatDisplayMoneyFromEur(estimate.vat)),
+    productDetailRow(t('importEstimate.fees'), formatDisplayMoneyFromEur(estimate.customsFee + estimate.brokerFee + estimate.domesticShipping)),
+    productDetailRow(t('importEstimate.extraTotal'), formatDisplayMoneyFromEur(estimate.estimatedTotalExtra)),
+    productDetailRow(t('importEstimate.grandTotal'), formatDisplayMoneyFromEur(estimate.estimatedGrandTotal))
+  ].filter(Boolean).join('');
+  const warnings = [...new Set(estimate.warnings || [])].map(importWarningText).filter(Boolean);
+  return `
+    <section class="entity-import-estimate">
+      <div class="entity-import-estimate-title">${H(t('importEstimate.title'))}</div>
+      <div class="entity-import-estimate-rows">${rows}</div>
+      <div class="entity-import-estimate-warning">${H(t('importEstimate.disclaimer'))}</div>
+      ${warnings.length ? `<div class="entity-import-estimate-warning">${warnings.map(H).join(' · ')}</div>` : ''}
+    </section>`;
+}
+
 function buildCollectionDetailRows(item, priceEur) {
   const shipping = Number(item.shippingEur || 0);
   const deposit = Number(item.deposit || 0);
@@ -2148,10 +2370,10 @@ function buildCollectionDetailRows(item, priceEur) {
     productDetailRow('Производитель', item.manufacturer),
     productDetailRow('Дата выхода', item.releaseDate),
     productDetailRow('Статус', item.status),
-    productDetailRow('Цена', item.priceOriginal ? `${item.priceOriginal} ${item.currency || ''} · €${priceEur.toFixed(2)}` : ''),
-    productDetailRow('Доставка', shipping ? `€${shipping.toFixed(2)}` : ''),
-    productDetailRow('Предоплата', deposit ? `€${deposit.toFixed(2)}` : ''),
-    productDetailRow('Остаток', `€${remaining.toFixed(2)}`),
+    productDetailRow('Цена', item.priceOriginal ? `${item.priceOriginal} ${item.currency || ''} · ${eur(priceEur)}` : ''),
+    productDetailRow('Доставка', shipping ? eur(shipping) : ''),
+    productDetailRow('Предоплата', deposit ? eur(deposit) : ''),
+    productDetailRow('Остаток', eur(remaining)),
     productDetailRow('Трек-номер', item.tracking),
     productDetailRow('Масштаб / тип', item.scale),
     productDetailRow('Метод доставки', item.shipMethod),
@@ -2165,7 +2387,8 @@ function buildCollectionDetailRows(item, priceEur) {
     productDetailRow('Источник импорта', item.source),
     productDetailLink('Ссылка-источник', item.sourceUrl),
     productDetailLink('Страница товара', item.shopUrl, t('common.openStore')),
-    item.tags?.length ? productDetailRow('Теги', `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true) : ''
+    item.tags?.length ? productDetailRow('Теги', `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true) : '',
+    buildImportEstimateBlock(item)
   ].filter(Boolean).join('');
 }
 
@@ -2181,7 +2404,7 @@ function buildWishlistDetailRows(item, priceEur) {
     productDetailRow(t('modal.store'), item.store),
     productDetailRow(t('modal.manufacturer'), item.manufacturer),
     productDetailRow(t('wishlist.release'), item.releaseDate),
-    productDetailRow(t('modal.price'), item.priceOriginal ? `${item.priceOriginal} ${item.currency || ''} · €${priceEur.toFixed(2)}` : ''),
+    productDetailRow(t('modal.price'), item.priceOriginal ? `${item.priceOriginal} ${item.currency || ''} · ${eur(priceEur)}` : ''),
     productDetailLink(t('modal.productPage'), item.shopUrl, t('common.openStore')),
     productDetailRow('Источник импорта', item.source),
     productDetailLink('Ссылка-источник', item.sourceUrl),
@@ -2191,7 +2414,8 @@ function buildWishlistDetailRows(item, priceEur) {
     productDetailRow('Окончание предзаказа', item.preorderEnd),
     productDetailRow('Статус релиза', item.releaseStatus && item.releaseStatus !== 'unknown' ? item.releaseStatus : ''),
     item.tags?.length ? productDetailRow(t('modal.tags'), `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true) : '',
-    productDetailRow(t('modal.notes'), item.notes || item.note)
+    productDetailRow(t('modal.notes'), item.notes || item.note),
+    buildImportEstimateBlock(item)
   ].filter(Boolean).join('');
 }
 
@@ -2838,7 +3062,7 @@ export function renderShelf() {
       <div class="shelf-hero-cell"><span>Показано</span><strong>${items.length}</strong><small>по текущему фильтру</small></div>`;
   }
   const stats = document.getElementById('shelfStats');
-  if (stats) stats.innerHTML = `<span style="color:var(--green);font-weight:700;">${received.length} фигурок</span> · итого <span style="color:var(--green);font-weight:700;">€${totalSpent.toFixed(2)}</span>`;
+  if (stats) stats.innerHTML = `<span style="color:var(--green);font-weight:700;">${received.length} фигурок</span> · итого <span style="color:var(--green);font-weight:700;">${eur(totalSpent)}</span>`;
   const grid = document.getElementById('shelfGrid');
   if (!items.length) { grid.innerHTML = `<div style="color:var(--muted);text-align:center;padding:60px 0;grid-column:1/-1;">${t('shelf.empty')}</div>`; return; }
   grid.innerHTML = items.map((item, idx) => {
@@ -2858,7 +3082,7 @@ export function renderShelf() {
     <div class="gallery-card animate-in" style="animation-delay:${idx * 30}ms" onclick="if(isCardOpenBlocked(event))return;openEntityDetail('collection','${H(item.id)}')">
       <div class="gallery-img-wrap">
         ${mediaHtml}
-        <div class="gallery-overlay"><div class="gallery-name">${H(item.name)}</div><div class="gallery-price">€${item.totalPaid.toFixed(2)}</div></div>
+        <div class="gallery-overlay"><div class="gallery-name">${H(item.name)}</div><div class="gallery-price">${eur(item.totalPaid)}</div></div>
       </div>
     </div>`;
   }).join('');
