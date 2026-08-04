@@ -153,7 +153,7 @@ export function normalizeClipboardPayload(payload) {
 }
 
 export function fillMainFormFromImportedItem(item) {
-  const imageList = mergeTags([], [...(Array.isArray(item.images) ? item.images : []), item.imageUrl || item.img]);
+  const imageList = [...new Set([...(Array.isArray(item.images) ? item.images : []), item.imageUrl || item.img].filter(Boolean))];
   const currentTags = document.getElementById('fTags')?.value || '';
   const mergedTags = mergeTags(currentTags, item.tags || []);
   const changed = [
@@ -179,7 +179,7 @@ export function fillMainFormFromImportedItem(item) {
 }
 
 export function fillWishFormFromImportedItem(item) {
-  const imageList = mergeTags([], [...(Array.isArray(item.images) ? item.images : []), item.imageUrl || item.img]);
+  const imageList = [...new Set([...(Array.isArray(item.images) ? item.images : []), item.imageUrl || item.img].filter(Boolean))];
   const currentTags = document.getElementById('wTags')?.value || '';
   const mergedTags = mergeTags(currentTags, item.tags || []);
   const changed = [

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 
 <head>
@@ -226,8 +226,8 @@
       <h2 style="font-size:20px;font-weight:800;margin-bottom:4px;" data-i18n="settings.title">⚙️ Настройки</h2>
 
       <!-- Дефолты формы -->
-      <div class="breakdown" style="position:unset;">
-        <div class="breakdown-title" data-i18n="settings.defaults">Значения по умолчанию</div>
+      <details class="breakdown" style="position:unset;" open>
+        <summary class="breakdown-title" data-i18n="settings.defaults">Значения по умолчанию</summary>
         <div class="form-grid" style="margin-top:10px;">
           <div class="form-group">
             <div class="form-label" data-i18n="settings.countryProfile">Профиль страны</div>
@@ -291,11 +291,20 @@
               <option value="clean" data-i18n="settings.themeClean">Clean dark</option>
             </select>
           </div>
+          <div class="form-group">
+            <div class="form-label">Сервис отслеживания посылок</div>
+            <select id="sTrackingService" onchange="saveSettings()">
+              <option value="auto">Автовыбор (JJ/LX/RR → ParcelsApp, остальные → 17track)</option>
+              <option value="17track">17track</option>
+              <option value="parcelsapp">ParcelsApp</option>
+              <option value="postalninja">PostalNinja</option>
+            </select>
+          </div>
         </div>
-      </div>
+      </details>
 
-      <div class="breakdown">
-        <div class="breakdown-title" data-i18n="settings.taxCustoms">Налоги и таможня</div>
+      <details class="breakdown">
+        <summary class="breakdown-title" data-i18n="settings.taxCustoms">Налоги и таможня</summary>
         <div class="form-grid" style="margin-top:10px;">
           <div class="form-group">
             <div class="form-label" data-i18n="settings.taxCalculationMode">Расчёт</div>
@@ -326,6 +335,13 @@
             <input id="sVatRate" type="number" step="0.1" min="0" value="0" oninput="saveSettings()" />
           </div>
           <div class="form-group">
+            <div class="form-label">База НДС</div>
+            <select id="sVatBase" onchange="saveSettings()">
+              <option value="over_limit">От суммы сверх лимита (UA)</option>
+              <option value="full">От полной стоимости (EU / Финляндия)</option>
+            </select>
+          </div>
+          <div class="form-group">
             <div class="form-label" data-i18n="settings.customsFee">Комиссия таможни/перевозчика</div>
             <input id="sCustomsFee" type="number" step="0.01" min="0" value="0" oninput="saveSettings()" />
           </div>
@@ -339,7 +355,7 @@
           </div>
         </div>
         <div style="font-size:11px;color:var(--muted);margin-top:8px;" data-i18n="settings.taxDisclaimer">Расчёт примерный, правила и курс могут отличаться.</div>
-      </div>
+      </details>
 
       <!-- Данные -->
       <div class="breakdown">
@@ -351,6 +367,15 @@
             style="border-color:var(--accent);" />
           <div style="font-size:11px;color:var(--muted);margin-top:6px;" data-i18n="settings.googleScriptHelp">Сюда нужно вставить Web App URL вашего
             развернутого скрипта, чтобы сохранять бэкапы и фото на свой личный Google Диск.</div>
+        </div>
+
+        <div class="form-group" style="margin-top:10px; margin-bottom:16px;">
+          <div class="form-label">Куда загружать новые фото?</div>
+          <select id="sUploadProvider" onchange="saveSettings()" style="border-color:var(--accent);">
+            <option value="telegram">Telegram</option>
+            <option value="drive">Google Диск</option>
+          </select>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;">Выберите, куда будут загружаться фото фигурок.</div>
         </div>
         <!-- Настройки Telegram -->
         <div class="breakdown" style="margin-top: 15px;">

@@ -1,4 +1,4 @@
-﻿// js/ui.js
+// js/ui.js
 import { state, appState, persist, schedulePersist, toEur, buildChangeHistoryComments, appendSystemHistoryComments, addSystemHistoryComment, getCountryProfile, getCountryProfileId, getDefaultCurrency, getDefaultRegion, getDefaultShipMethod, getDisplayCurrency, getProfileRegions, getProfileShippingMethods, getRegionalRules, getRegionalRuleProfile } from './state.js';
 import { H, eur, fromEur, toBaseEur, calcAmiAmiShipping, calcOrder, SCALE_WEIGHTS, calculateImportEstimate } from './utils.js';
 import * as API from './api.js';
@@ -71,6 +71,8 @@ function refreshRegionalSelects(selected = {}) {
     { value: 'ua', label: t('settings.profileUa') },
     { value: 'custom', label: t('settings.profileCustom') }
   ], selected.countryProfile ?? defaults.profileId);
+  const trackingEl = document.getElementById('sTrackingService');
+  if (trackingEl) trackingEl.value = s.trackingService || 'auto';
 }
 
 function formatDisplayMoneyFromEur(amountEur) {
@@ -116,6 +118,8 @@ function refreshRegionalRuleFields(rules = getRegionalRules()) {
     { value: 'off', label: t('settings.taxModeOff') },
     { value: 'manual', label: t('settings.taxModeManual') }
   ], rules.taxCalculationMode || 'off');
+  const vatBaseEl = document.getElementById('sVatBase');
+  if (vatBaseEl) vatBaseEl.value = rules.vatBase || 'over_limit';
   const values = {
     sTaxFreeLimit: rules.taxFreeLimit,
     sImportDutyRate: rules.importDutyRate,
@@ -140,6 +144,7 @@ function collectRegionalRules(profileDefaults = null) {
     taxFreeLimitCurrency: profileDefaults ? base.taxFreeLimitCurrency : (document.getElementById('sTaxFreeLimitCurrency')?.value || base.taxFreeLimitCurrency || 'EUR'),
     importDutyRate: profileDefaults ? base.importDutyRate : readNumberInput('sImportDutyRate', base.importDutyRate),
     vatRate: profileDefaults ? base.vatRate : readNumberInput('sVatRate', base.vatRate),
+    vatBase: profileDefaults ? base.vatBase : (document.getElementById('sVatBase')?.value || base.vatBase || 'over_limit'),
     customsFee: profileDefaults ? base.customsFee : readNumberInput('sCustomsFee', base.customsFee),
     brokerFee: profileDefaults ? base.brokerFee : readNumberInput('sBrokerFee', base.brokerFee),
     domesticShipping: profileDefaults ? base.domesticShipping : readNumberInput('sDomesticShipping', base.domesticShipping),
@@ -301,7 +306,7 @@ export function syncPreviewVideoToggle(video) {
   wrapper.classList.toggle('is-playing', isPlaying);
   const btn = wrapper.querySelector('.media-video-toggle');
   if (btn) {
-    btn.textContent = isPlaying ? '∎' : '▶';
+    btn.innerHTML = isPlaying ? '⏸' : '▶';
     btn.setAttribute('aria-label', isPlaying ? t('video.pause') : t('video.play'));
   }
   const soundBtn = wrapper.querySelector('.media-video-sound');
@@ -351,16 +356,25 @@ export function initPreviewVideoControlsObserver() {
   ensurePreviewVideoControls(document);
 }
 
-export function togglePreviewVideo(event) {
-  stopMediaEvent(event);
+export async function togglePreviewVideo(event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  
   const wrapper = event?.currentTarget?.closest?.('.media-video-preview')
     || event?.target?.closest?.('.media-video-preview');
-  const video = wrapper?.querySelector('video');
+  
+  if (!wrapper) return;
+  const video = wrapper.querySelector('video');
   if (!video) return;
 
   if (video.paused || video.ended) {
     pauseAllVideosExcept(video);
-    video.play?.().catch(() => null);
+    try {
+      await video.play();
+    } catch (err) {
+      console.warn('[togglePreviewVideo] Не удалось запустить видео:', err);
+    }
   } else {
     video.pause();
   }
@@ -485,7 +499,7 @@ export async function handleMediaLoadError(el) {
       fileId,
       mediaType: el.dataset.mediaType || ''
     };
-    const freshUrl = await refreshTelegramMediaUrl(tempMedia, getTelegramSettings());
+    const freshUrl = await refreshTelegramMediaUrl(tempMedia, getTelegramSettings().tgBotToken);
     if (!freshUrl) throw new Error('empty fresh Telegram URL');
 
     if (el.tagName === 'VIDEO') {
@@ -958,7 +972,7 @@ export function estimateShipping() {
   const store = document.getElementById('fStore').value.trim().toLowerCase();
   const isOrzGK = store.includes('orzgk') || store.includes('orz');
   const region = document.getElementById('fRegion').value;
-  const isEU = region === 'ЕС';
+  const isEU = region === 'ЕС' || region === 'EU' || region === 'ЄС';
   const method = document.getElementById('fShipMethod').value;
   const countryProfile = getCountryProfileId();
   const orderItems = state.items.filter(i => i.orderNumber === orderNumber && i.id !== (appState.editingId || ''));
@@ -1174,17 +1188,32 @@ export function renderDetail() {
     <div class="figure-meta">💱 ${H(String(item.priceOriginal ?? '—'))} ${H(item.currency || '')}${item.currency && item.currency !== 'EUR' ? ` → <span style="color:var(--accent)">${eur(priceEur)}</span>` : ''}</div>
     <div class="product-badges">${renderProductMetaBadges(item)}</div>
     ${item.shopUrl ? `<a href="${H(item.shopUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--accent);text-decoration:none;margin-top:6px;margin-bottom:2px;">🔗 Открыть в магазине</a>` : ''}
-    ${item.tags?.length ? `<div class="tags">${item.tags.map(t => `<span class="tag">${H(t)}</span>`).join('')}</div>` : ''}
+    ${item.tags?.length ? (function() {
+      const maxTags = 4;
+      const visible = item.tags.slice(0, maxTags);
+      const hidden = item.tags.length - maxTags;
+      let html = `<div class="tags">` + visible.map(t => `<span class="tag">${H(t)}</span>`).join('');
+      if (hidden > 0) html += `<span class="tag" style="background: rgba(255,255,255,0.05); color: var(--muted);">+${hidden}</span>`;
+      html += `</div>`;
+      return html;
+    })() : ''}
   </div>
 </div>`;
   }).join('');
   const allReceived = order.items.every(i => i.status === 'Получено');
   const isHidden = order.items.every(i => i.hidden);
   const trackingCode = order.items.find(i => i.tracking)?.tracking;
+  const _trackingService = state.settings?.trackingService || 'auto';
   const trackUrl = trackingCode
-    ? (trackingCode.startsWith('JJ') || trackingCode.startsWith('LX') || trackingCode.startsWith('RR'))
+    ? _trackingService === 'parcelsapp'
       ? `https://parcelsapp.com/tracking/${trackingCode}`
-      : `https://t.17track.net/en#nums=${trackingCode}`
+      : _trackingService === 'postalninja'
+        ? `https://postal.ninja/en/track/${trackingCode}`
+        : _trackingService === '17track'
+          ? `https://t.17track.net/en#nums=${trackingCode}`
+          : (trackingCode.startsWith('JJ') || trackingCode.startsWith('LX') || trackingCode.startsWith('RR'))
+            ? `https://parcelsapp.com/tracking/${trackingCode}`
+            : `https://t.17track.net/en#nums=${trackingCode}`
     : null;
   pane.innerHTML = `
 <div class="detail-header fade-in" style="animation-delay:0ms">
@@ -1251,6 +1280,7 @@ export function closeForm() {
   stopMedia(document.getElementById('formOverlay'), { resetSrc: false });
   document.getElementById('formOverlay').style.display = 'none';
   appState.editingId = null;
+  appState.movingFromWishlistId = null;
   if (appState.historyLayer === 'form') appState.historyLayer = null;
   clearForm();
 }
@@ -1432,13 +1462,14 @@ export function saveItem() {
   item.comments = appState.editingId ? appendSystemHistoryComments([...(existingItem?.comments || [])], historyComments) : (appState.pendingEntityNotes?.comments || []);
   item.tasks = appState.editingId ? (existingItem?.tasks || []) : (appState.pendingEntityNotes?.tasks || []);
   const wasEditing = Boolean(appState.editingId);
-  if (appState.editingId) { const idx = state.items.findIndex(i => i.id === appState.editingId); state.items[idx] = item; }
+  if (appState.editingId) { const idx = state.items.findIndex(i => i.id === appState.editingId); if (idx >= 0) state.items[idx] = item; else state.items.push(item); }
   else state.items.push(item);
   syncGlobalTags();
   appState.selectedOrder = orderNumber;
   appState.pendingUploadedMedia = [];
   appState.pendingEntityNotes = null;
   if (!wasEditing) clearItemDraft();
+  if (appState.movingFromWishlistId) { state.wishlist = (state.wishlist || []).filter(x => x.id !== appState.movingFromWishlistId); appState.movingFromWishlistId = null; }
   closeForm(); persist(); render(); toast(wasEditing ? t('toast.saved') : t('toast.itemAdded'));
 }
 
@@ -1458,6 +1489,9 @@ export function loadSettings() {
   if (document.getElementById('sTheme')) document.getElementById('sTheme').value = s.theme || 'cyberpunk';
   applyUiDensity();
   document.getElementById('sScriptUrl').value = s.scriptUrl || '';
+  if (document.getElementById('sUploadProvider')) {
+    document.getElementById('sUploadProvider').value = s.uploadProvider || 'telegram';
+  }
   document.getElementById('sTgBotToken').value = s.tgBotToken || '';
   document.getElementById('sTgChatId').value = s.tgChatId || '';
 
@@ -1505,9 +1539,11 @@ export function saveSettings(options = {}) {
     shipMethod: profileDefaults?.shipMethod || document.getElementById('sShipMethod').value,
     density: document.getElementById('sDensity')?.value || state.settings?.density || 'compact',
     theme: document.getElementById('sTheme')?.value || state.settings?.theme || 'cyberpunk',
+    trackingService: document.getElementById('sTrackingService')?.value || 'auto',
     tags: existingTags,
     gallery: state.settings?.gallery || {},
     scriptUrl: document.getElementById('sScriptUrl').value.trim(),
+    uploadProvider: document.getElementById('sUploadProvider')?.value || 'telegram',
     tgBotToken: document.getElementById('sTgBotToken').value.trim(),
     tgChatId: document.getElementById('sTgChatId').value.trim()
   };
@@ -2043,7 +2079,7 @@ export function moveWishToCollection(id) {
   document.getElementById('fSourceUrl').value = w.sourceUrl || '';
   updateEurPreview();
   switchTab('collection');
-  document.getElementById('formTitle').dataset.i18n = 'form.addFigure'; document.getElementById('formTitle').textContent = t('form.addFigure'); appState.editingId = null; document.getElementById('formOverlay').style.display = 'flex'; pushUiHistory('form'); toast(t('toast.moveWishPrompt'));
+  document.getElementById('formTitle').dataset.i18n = 'form.addFigure'; document.getElementById('formTitle').textContent = t('form.addFigure'); appState.editingId = null; appState.movingFromWishlistId = id; document.getElementById('formOverlay').style.display = 'flex'; pushUiHistory('form'); toast(t('toast.moveWishPrompt'));
 }
 
 function mediaUrlsOf(item) {
@@ -2312,9 +2348,9 @@ function applyLightboxVideoState() {
   else video.addEventListener('loadedmetadata', apply, { once: true });
 }
 
-function productDetailRow(label, value, isHtml = false) {
+function productDetailRow(label, value, isHtml = false, extraClass = '') {
   if (value == null || value === '') return '';
-  return `<div class="modal-row entity-detail-row product-detail-row"><span class="modal-label">${H(label)}</span>${isHtml ? `<span>${value}</span>` : `<span>${H(value)}</span>`}</div>`;
+  return `<div class="modal-row entity-detail-row product-detail-row ${extraClass}"><span class="modal-label">${H(label)}</span>${isHtml ? `<span>${value}</span>` : `<span>${H(value)}</span>`}</div>`;
 }
 
 function productDetailLink(label, url, text = '') {
@@ -2349,12 +2385,12 @@ function buildImportEstimateBlock(item) {
   ].filter(Boolean).join('');
   const warnings = [...new Set(estimate.warnings || [])].map(importWarningText).filter(Boolean);
   return `
-    <section class="entity-import-estimate">
-      <div class="entity-import-estimate-title">${H(t('importEstimate.title'))}</div>
+    <details class="entity-import-estimate">
+      <summary class="entity-import-estimate-title">${H(t('importEstimate.title'))}</summary>
       <div class="entity-import-estimate-rows">${rows}</div>
       <div class="entity-import-estimate-warning">${H(t('importEstimate.disclaimer'))}</div>
       ${warnings.length ? `<div class="entity-import-estimate-warning">${warnings.map(H).join(' · ')}</div>` : ''}
-    </section>`;
+    </details>`;
 }
 
 function buildCollectionDetailRows(item, priceEur) {
@@ -2387,7 +2423,7 @@ function buildCollectionDetailRows(item, priceEur) {
     productDetailRow('Источник импорта', item.source),
     productDetailLink('Ссылка-источник', item.sourceUrl),
     productDetailLink('Страница товара', item.shopUrl, t('common.openStore')),
-    item.tags?.length ? productDetailRow('Теги', `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true) : '',
+    item.tags?.length ? productDetailRow('Теги', `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true, 'product-detail-row-tags') : '',
     buildImportEstimateBlock(item)
   ].filter(Boolean).join('');
 }
@@ -2413,7 +2449,7 @@ function buildWishlistDetailRows(item, priceEur) {
     productDetailRow('Старт предзаказа', item.preorderStart),
     productDetailRow('Окончание предзаказа', item.preorderEnd),
     productDetailRow('Статус релиза', item.releaseStatus && item.releaseStatus !== 'unknown' ? item.releaseStatus : ''),
-    item.tags?.length ? productDetailRow(t('modal.tags'), `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true) : '',
+    item.tags?.length ? productDetailRow(t('modal.tags'), `<span class="tags">${item.tags.map(tag => `<span class="tag">${H(tag)}</span>`).join('')}</span>`, true, 'product-detail-row-tags') : '',
     productDetailRow(t('modal.notes'), item.notes || item.note),
     buildImportEstimateBlock(item)
   ].filter(Boolean).join('');
@@ -2534,14 +2570,13 @@ function renderEntityComments(type, id, comments = []) {
 }
 
 function renderEntityNotesPanel(type, id, item) {
-  const { comments, tasks } = ensureEntityLists(item);
+  const { tasks } = ensureEntityLists(item);
   return `<section class="entity-notes-panel">
     <div class="entity-notes-head">
-      <strong>Комментарии и задачи</strong>
+      <strong>Задачи</strong>
       <span>${tasks.filter(task => !task.done).length} активных</span>
     </div>
     <div class="entity-tasks">
-      <h4>Задачи</h4>
       <div class="entity-task-templates">
         <button class="btn btn-sm" type="button" onclick="fillEntityTaskTemplate('payment')">Оплатить</button>
         <button class="btn btn-sm" type="button" onclick="fillEntityTaskTemplate('release')">Проверить релиз</button>
@@ -2573,6 +2608,12 @@ function renderEntityNotesPanel(type, id, item) {
       </div>
       <div class="entity-task-list">${renderEntityTasks(type, id, tasks)}</div>
     </div>
+  </section>`;
+}
+
+function renderEntityCommentsPanel(type, id, item) {
+  const { comments } = ensureEntityLists(item);
+  return `<section class="entity-notes-panel">
     <div class="entity-comments">
       <h4>История / комментарии</h4>
       <div class="entity-note-form">
@@ -2806,7 +2847,7 @@ function renderProductDetailThumbs(items, activeIndex, ownerId, onSelect, ownerT
 
 function unbindEntityDetailMobileCollapse() {
   const modal = document.querySelector('#modalOverlay .entity-detail-modal');
-  const scroller = document.querySelector('#modalOverlay .modal-body');
+  const scroller = modal;
   if (scroller && appState.entityDetailCollapseScrollHandler) {
     scroller.removeEventListener('scroll', appState.entityDetailCollapseScrollHandler);
   }
@@ -2816,7 +2857,7 @@ function unbindEntityDetailMobileCollapse() {
 
 function bindEntityDetailMobileCollapse() {
   const modal = document.querySelector('#modalOverlay .entity-detail-modal');
-  const scroller = document.querySelector('#modalOverlay .modal-body');
+  const scroller = modal;
   if (!modal || !scroller) return;
 
   if (appState.entityDetailCollapseScrollHandler) {
@@ -2900,6 +2941,7 @@ export function openEntityDetail(type, id) {
   overlay?.classList.toggle('wishlist-detail-overlay', ownerType === 'wishlist');
   const modalBox = document.querySelector('#modalOverlay .modal-box');
   modalBox?.classList.add('entity-detail-modal', 'product-detail-modal');
+  if (modalBox) modalBox.scrollTop = 0;
   let backBtn = document.getElementById('entityDetailBack');
   if (!backBtn && modalBox) {
     backBtn = document.createElement('button');
@@ -2930,9 +2972,23 @@ export function openEntityDetail(type, id) {
   if (!notesPanel) {
     notesPanel = document.createElement('div');
     notesPanel.id = 'entityNotesPanel';
-    document.getElementById('modalRows').insertAdjacentElement('afterend', notesPanel);
+    notesPanel.style.gridColumn = '2';
+    notesPanel.style.gridRow = '4';
+    notesPanel.style.minWidth = '0';
+    modalBox.appendChild(notesPanel);
   }
   notesPanel.innerHTML = renderEntityNotesPanel(ownerType, id, rawItem);
+
+  let commentsPanel = document.getElementById('entityCommentsPanel');
+  if (!commentsPanel) {
+    commentsPanel = document.createElement('div');
+    commentsPanel.id = 'entityCommentsPanel';
+    commentsPanel.style.gridColumn = '1';
+    commentsPanel.style.gridRow = '4';
+    commentsPanel.style.minWidth = '0';
+    modalBox.appendChild(commentsPanel);
+  }
+  commentsPanel.innerHTML = renderEntityCommentsPanel(ownerType, id, rawItem);
 
   const imgs = mediaEntriesOf(item);
   appState.entityDetail = { type: ownerType, id, media: imgs, mediaIndex: 0 };
@@ -3005,6 +3061,7 @@ export function closeEntityDetail() {
   document.getElementById('productDetailLightboxBtn')?.remove();
   document.getElementById('productDetailThumbs')?.remove();
   document.getElementById('entityNotesPanel')?.remove();
+  document.getElementById('entityCommentsPanel')?.remove();
   document.getElementById('entityDetailBack')?.remove();
   window.currentModalMedia = [];
   appState.entityDetail = null;

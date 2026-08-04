@@ -31,7 +31,12 @@ function shouldUseExternalUrl(url) {
 }
 
 function isExternalVideoUrl(url) {
-  return shouldUseExternalUrl(url) && (isVideoUrl(url) || /video/i.test(String(url)));
+  if (!shouldUseExternalUrl(url)) return false;
+  if (isVideoUrl(url)) return true;
+  try {
+    const segments = new URL(String(url)).pathname.split('/');
+    return segments.some(s => /^videos?$/i.test(s));
+  } catch { return false; }
 }
 
 function isExternalImageUrl(url) {
@@ -261,7 +266,8 @@ export function saveWish() {
   if (!state.wishlist) state.wishlist = [];
   if (appState.editingWishId) {
     const idx = state.wishlist.findIndex(w => w.id === appState.editingWishId);
-    state.wishlist[idx] = wish;
+    if (idx >= 0) state.wishlist[idx] = wish;
+    else state.wishlist.push(wish);
   } else {
     state.wishlist.push(wish);
   }

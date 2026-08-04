@@ -7,6 +7,7 @@ const MONTH_ROOTS = ['январ', 'феврал', 'март', 'апрел', 'м
 
 function orderStatus(order) {
   const statuses = order.items.map(item => item.status);
+  if (!statuses.length) return 'Не оплачено';
   if (statuses.every(status => status === 'Получено')) return 'Получено';
   if (statuses.some(status => status === 'В пути')) return 'В пути';
   if (statuses.every(status => status === 'Полностью оплачено' || status === 'Получено' || status === 'В пути')) return 'Полностью оплачено';
@@ -38,7 +39,7 @@ export function getCollectionTotals(orders = []) {
       const itemTotal = getItemTotalEur(item);
       const deposit = Number(item.deposit) || 0;
       if (item.status === 'Получено') totals.paid += itemTotal + taxPerItem;
-      else if (item.status === 'В пути' || item.status === 'Полностью оплачено') totals.paid += itemTotal;
+      else if (item.status === 'В пути' || item.status === 'Полностью оплачено') totals.paid += itemTotal + taxPerItem;
       else if (item.status === 'Депозит оплачен') totals.paid += deposit;
     });
   });
@@ -87,21 +88,31 @@ export function renderReleaseRows(items, emptyText) {
   }).join('');
 }
 
+function normalizeDueMonth(dueDate) {
+  const raw = String(dueDate || '');
+  // YYYY-MM or YYYY-MM-DD
+  const iso = raw.match(/^(\d{4})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  // DD.MM.YYYY
+  const dmy = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (dmy) return `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}`;
+  return null;
+}
+
 function taskDueValue(dueDate) {
   if (!dueDate) return 99999999;
-  const normalized = String(dueDate);
-  if (/^\d{4}-\d{2}$/.test(normalized)) return Number(normalized.replace('-', '')) * 100;
-  const time = new Date(normalized).getTime();
-  return Number.isNaN(time) ? 99999999 : Number(normalized.replace(/\D/g, '').slice(0, 8));
+  const month = normalizeDueMonth(dueDate);
+  if (month) return Number(month.replace('-', '')) * 100;
+  return 99999999;
 }
 
 function taskBucket(dueDate) {
   if (!dueDate) return 3;
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const raw = String(dueDate);
-  const month = raw.slice(0, 7);
-  if (raw < currentMonth) return 0;
+  const month = normalizeDueMonth(dueDate);
+  if (!month) return 3;
+  if (month < currentMonth) return 0;
   if (month === currentMonth) return 1;
   return 2;
 }

@@ -56,6 +56,7 @@ const REGIONAL_RULE_PROFILES = {
     taxFreeLimitCurrency: 'EUR',
     importDutyRate: 4.7,
     vatRate: 25.5,
+    vatBase: 'full',
     customsFee: 0,
     brokerFee: 0,
     domesticShipping: 0,
@@ -68,6 +69,7 @@ const REGIONAL_RULE_PROFILES = {
     taxFreeLimitCurrency: 'EUR',
     importDutyRate: 10,
     vatRate: 20,
+    vatBase: 'over_limit',
     customsFee: 0,
     brokerFee: 0,
     domesticShipping: 0,
@@ -80,6 +82,7 @@ const REGIONAL_RULE_PROFILES = {
     taxFreeLimitCurrency: 'EUR',
     importDutyRate: 0,
     vatRate: 0,
+    vatBase: 'over_limit',
     customsFee: 0,
     brokerFee: 0,
     domesticShipping: 0,
@@ -108,6 +111,9 @@ export let appState = {
     currentTab: 'collection',
     editingWishId: null,
     modalItemId: null,
+    movingFromWishlistId: null,
+    pendingUploadedMedia: [],
+    pendingEntityNotes: null,
     lightboxPhotos: [],
     lightboxIndex: 0,
     lightboxTouchStartX: null,
@@ -201,7 +207,7 @@ export function getDefaultShipMethod(settings = state.settings || {}) {
 
 export function getRegionalRules(settings = state.settings || {}) {
   const profileId = getCountryProfileId(settings);
-  const base = REGIONAL_RULE_PROFILES[profileId] || REGIONAL_RULE_PROFILES.fi;
+  const base = REGIONAL_RULE_PROFILES[profileId] || REGIONAL_RULE_PROFILES.custom;
   const saved = settings.regionalRules && typeof settings.regionalRules === 'object' ? settings.regionalRules : {};
   return {
     ...base,

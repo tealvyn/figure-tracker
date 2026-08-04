@@ -84,7 +84,7 @@ export function bindStaticControls() {
   document.getElementById('statusFilters')?.addEventListener('click', e => {
     const chip = e.target.closest('.chip');
     if (!chip) return;
-    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('#statusFilters .chip').forEach(c => c.classList.remove('active'));
     chip.classList.add('active');
     const val = chip.dataset.filter;
     appState.filterStatus = val === '' ? null : val;

@@ -11,6 +11,12 @@ import { getImageUrl, uploadMediaBatch } from './media-storage.js';
 Object.assign(window, UI);
 Object.assign(window, API);
 window.debugTampermonkeyImport = UI.debugTampermonkeyImport;
+
+// Explicit exports for inline handlers
+window.togglePreviewVideo = UI.togglePreviewVideo;
+window.syncPreviewVideoToggle = UI.syncPreviewVideoToggle;
+window.stopMediaEvent = UI.stopMediaEvent;
+
 window.state = state;
 window.appState = appState;
 

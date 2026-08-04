@@ -138,8 +138,6 @@ function isImportExempt(item = {}, settings = {}, storeOverride = '') {
   const rules = settings.regionalRules || {};
   const profile = String(rules.countryProfile || settings.countryProfile || '').toLowerCase();
   const region = String(item.region || '').trim().toUpperCase();
-  const store = String(storeOverride || item.store || '').trim().toLowerCase();
-  if (store.includes('orzgk') || store.includes('orz')) return true;
   if (profile === 'ua') return ['УКРАИНА', 'УКРАЇНА', 'UKRAINE'].includes(region);
   if (profile === 'fi') return ['ЕС', 'ЄС', 'EU'].includes(region);
   return false;
@@ -168,7 +166,7 @@ export function calculateImportEstimate(item, settings = {}, rates = state.rates
   const currency = item?.currency || 'EUR';
   if (!price) warnings.push('missingAmount');
 
-  const goodsEur = toEur(price, currency);
+  const goodsEur = +((Number(price) || 0) * (Number(rates[currency]) || 1)).toFixed(2);
   if (currency !== 'EUR' && !rates[currency]) warnings.push('missingItemRate');
 
   const shippingEur = Number(item?.shippingEur) || 0;
@@ -198,9 +196,19 @@ export function calculateImportEstimate(item, settings = {}, rates = state.rates
   const domesticShipping = convertToEur(rules.domesticShipping, feeCurrency, rates);
   if (customsFee == null || brokerFee == null || domesticShipping == null) warnings.push('missingFeeRate');
 
+  const vatBase = rules.vatBase || 'over_limit';
   const overLimitAmount = Math.max(0, taxableBase - (limitEur ?? 0));
-  const importDuty = +(overLimitAmount * (Number(rules.importDutyRate) || 0) / 100).toFixed(2);
-  const vat = +((overLimitAmount + importDuty) * (Number(rules.vatRate) || 0) / 100).toFixed(2);
+  let importDuty, vat;
+  if (vatBase === 'full') {
+    // EU rules: duty only on the amount exceeding the threshold,
+    // but VAT is always charged on the FULL value (goods + shipping + duty), starting from 0 €
+    importDuty = +(overLimitAmount * (Number(rules.importDutyRate) || 0) / 100).toFixed(2);
+    vat = +((taxableBase + importDuty) * (Number(rules.vatRate) || 0) / 100).toFixed(2);
+  } else {
+    // UA and others: both duty and VAT are applied only to the amount over the limit
+    importDuty = +(overLimitAmount * (Number(rules.importDutyRate) || 0) / 100).toFixed(2);
+    vat = +((overLimitAmount + importDuty) * (Number(rules.vatRate) || 0) / 100).toFixed(2);
+  }
   const fixedFees = (customsFee ?? 0) + (brokerFee ?? 0) + (domesticShipping ?? 0);
   const estimatedTotalExtra = +(importDuty + vat + fixedFees).toFixed(2);
 

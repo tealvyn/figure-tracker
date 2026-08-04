@@ -293,35 +293,104 @@ export async function uploadImageToDrive(file, settings = {}, options = {}) {
   });
 }
 
+export async function convertToWebP(file, onProgress) {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/webp') {
+    return file;
+  }
+  if (onProgress) onProgress('Конвертация в WebP...');
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob((blob) => {
+          if (!blob) return resolve(file);
+          let newName = file.name;
+          const lastDotIndex = newName.lastIndexOf('.');
+          if (lastDotIndex !== -1) {
+            newName = newName.substring(0, lastDotIndex) + '.webp';
+          } else {
+            newName += '.webp';
+          }
+          const webpFile = new File([blob], newName, {
+            type: 'image/webp',
+            lastModified: Date.now()
+          });
+          resolve(webpFile);
+        }, 'image/webp', 0.8);
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function uploadImage(file, settings = {}, options = {}) {
   assertUploadFile(file);
 
+  const finalFile = await convertToWebP(file, message => notifyProgress(options, message));
+
+  const provider = settings.uploadProvider || 'telegram';
   const hasTelegram = Boolean(clean(settings.tgBotToken) && clean(settings.tgChatId));
   const hasDrive = Boolean(clean(settings.scriptUrl));
-  let telegramError = null;
 
-  if (hasTelegram) {
+  if (!hasTelegram && !hasDrive) {
+    throw new Error('Сначала укажите настройки Telegram или ссылку на Google Script в Настройках');
+  }
+
+  let primaryError = null;
+
+  if (provider === 'drive' && hasDrive) {
     try {
-      return await uploadImageToTelegram(file, settings, options);
+      return await uploadImageToDrive(finalFile, settings, options);
     } catch (error) {
-      telegramError = error;
+      primaryError = error;
+      if (!hasTelegram) throw error;
+      console.warn('[media-storage] Drive upload failed, trying Telegram fallback:', error?.message);
+    }
+  } else if (provider === 'telegram' && hasTelegram) {
+    try {
+      return await uploadImageToTelegram(finalFile, settings, options);
+    } catch (error) {
+      primaryError = error;
       if (!hasDrive) throw error;
       console.warn('[media-storage] Telegram upload failed, trying Drive fallback:', safeTelegramError(error?.message));
     }
   }
 
-  if (hasDrive) {
-    try {
-      return await uploadImageToDrive(file, settings, options);
-    } catch (driveError) {
-      if (telegramError) {
-        throw new Error(`Telegram и Google Drive не смогли загрузить файл: ${safeTelegramError(driveError.message)}`);
+  // Fallback to the other provider if the primary one failed or wasn't configured
+  if (provider === 'telegram' || primaryError) {
+    if (hasDrive) {
+      try {
+        return await uploadImageToDrive(finalFile, settings, options);
+      } catch (driveError) {
+        if (primaryError) {
+          throw new Error(`Оба провайдера (Telegram и Drive) не смогли загрузить файл: ${driveError.message}`);
+        }
+        throw driveError;
       }
-      throw driveError;
+    }
+  } else if (provider === 'drive' || primaryError) {
+    if (hasTelegram) {
+      try {
+        return await uploadImageToTelegram(finalFile, settings, options);
+      } catch (telegramError) {
+        if (primaryError) {
+          throw new Error(`Оба провайдера (Drive и Telegram) не смогли загрузить файл: ${safeTelegramError(telegramError.message)}`);
+        }
+        throw telegramError;
+      }
     }
   }
 
-  throw new Error('Сначала укажите настройки Telegram или ссылку на Google Script в Настройках');
+  throw new Error('Указанный провайдер не настроен, и запасной вариант недоступен.');
 }
 
 export async function uploadMediaBatch(filesInput, settings = {}, options = {}) {
@@ -447,18 +516,27 @@ export function renderMediaTag(media, className = '', alt = '') {
   const stopEvents = 'data-no-card-open="true" onpointerdown="window.stopMediaEvent?.(event);event.stopPropagation()" ontouchstart="window.stopMediaEvent?.(event);event.stopPropagation()"';
   const previewVideoEvents = `${stopEvents} onclick="window.togglePreviewVideo?.(event);event.stopPropagation()" onplay="window.syncPreviewVideoToggle?.(this)" onpause="window.syncPreviewVideoToggle?.(this)" onended="window.syncPreviewVideoToggle?.(this)"`;
 
+  // Telegram refresh attributes for expired URL auto-renewal
+  let tgAttrs = '';
+  if (typeof media === 'object' && media?.provider === 'telegram' && media?.fileId) {
+    const safeFileId = String(media.fileId).replace(/"/g, '&quot;');
+    const safeMediaType = String(media.mediaType || kind).replace(/"/g, '&quot;');
+    tgAttrs = ` data-provider="telegram" data-file-id="${safeFileId}" data-media-type="${safeMediaType}"`;
+  }
+  const errorHandler = tgAttrs ? 'onerror="window.handleMediaLoadError?.(this)"' : 'onerror="this.style.opacity=\'.1\'"';
+
   if (isGifLikeMedia(media)) {
     if (isVideoUrl(url) || String(url).includes('/animations/')) {
-      return `<video class="${className} media-gif-video" src="${safeUrl}" autoplay loop muted playsinline preload="auto" data-no-card-open="true" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()"></video>`;
+      return `<video class="${className} media-gif-video" src="${safeUrl}" autoplay loop muted playsinline preload="auto"${tgAttrs} data-no-card-open="true" ${errorHandler} onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" ontouchstart="event.stopPropagation()"></video>`;
     }
 
-    return `<img class="${className} media-gif-img" src="${safeUrl}" alt="${safeAlt}" loading="lazy" onerror="this.style.opacity='.1'">`;
+    return `<img class="${className} media-gif-img" src="${safeUrl}" alt="${safeAlt}" loading="lazy"${tgAttrs} ${errorHandler}>`;
   }
 
   if (kind === 'animation') {
     return `
       <div class="media-video-preview" data-no-card-open="true">
-        <video class="${className} media-preview-video media-video" loop muted playsinline preload="metadata" ${previewVideoEvents}>
+        <video class="${className} media-preview-video media-video" loop muted playsinline preload="metadata"${tgAttrs} ${errorHandler} ${previewVideoEvents}>
           <source src="${safeUrl}"${typeAttr}>
         </video>
         <button class="media-video-toggle" type="button" aria-label="Play video" onclick="window.togglePreviewVideo?.(event)">▶</button>
@@ -469,7 +547,7 @@ export function renderMediaTag(media, className = '', alt = '') {
   if (kind === 'video') {
     return `
       <div class="media-video-preview" data-no-card-open="true">
-        <video class="${className} media-preview-video media-video" preload="metadata" playsinline muted ${previewVideoEvents}>
+        <video class="${className} media-preview-video media-video" preload="metadata" playsinline muted${tgAttrs} ${errorHandler} ${previewVideoEvents}>
           <source src="${safeUrl}"${typeAttr}>
         </video>
         <button class="media-video-toggle" type="button" aria-label="Play video" onclick="window.togglePreviewVideo?.(event)">▶</button>
@@ -477,7 +555,7 @@ export function renderMediaTag(media, className = '', alt = '') {
     `;
   }
 
-  return `<img class="${className}" src="${safeUrl}" alt="${safeAlt}" loading="lazy" onerror="this.style.opacity='.1'">`;
+  return `<img class="${className}" src="${safeUrl}" alt="${safeAlt}" loading="lazy"${tgAttrs} ${errorHandler}>`;
 }
 
 export function detectMediaKind(fileOrUrl, mimeType = '') {
