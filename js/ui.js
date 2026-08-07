@@ -810,6 +810,29 @@ export function setGlobalSearch(value) {
   renderGlobalSearchResults();
 }
 
+export function resetAllFilters() {
+  appState.filterStatus = null;
+  appState.selectedOrder = null;
+  state.search = state.search || {};
+  state.search.global = '';
+  syncGlobalSearchInput();
+
+  const storeEl = document.getElementById('filterStore');
+  if (storeEl) storeEl.value = '';
+  const regionEl = document.getElementById('filterRegion');
+  if (regionEl) regionEl.value = '';
+  const searchInput = document.getElementById('searchInput');
+  if (searchInput) searchInput.value = '';
+  const wishPriority = document.getElementById('wishPriorityFilter');
+  if (wishPriority) wishPriority.value = '';
+
+  schedulePersist();
+  render();
+  renderWishlist();
+}
+
+window.resetAllFilters = resetAllFilters;
+
 export function showRatesBadge() {
   const badge = document.getElementById('ratesBadge');
   if (!badge) return;
@@ -1408,15 +1431,30 @@ export function saveItem() {
   if (!orderNumber) { alert(t('alert.orderNumberRequired')); return; }
   const existingItem = appState.editingId ? state.items.find(i => i.id === appState.editingId) : null;
   const uploadedMedia = appState.pendingUploadedMedia || [];
+  const currentFImgUrls = new Set(
+    document.getElementById('fImg').value
+      .split(/[\s,]+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+  );
+
+  const existingMediaToKeep = (existingItem?.media || []).filter(m => {
+    const url = getMediaUrl(m);
+    return !url || currentFImgUrls.has(url);
+  });
+  
+  const existingImagesToKeep = (existingItem?.images || []).filter(m => {
+    const url = getMediaUrl(m);
+    return !url || currentFImgUrls.has(url);
+  });
+
   const media = mergeMediaByUrl(
-    existingItem?.media || [],
-    existingItem?.images || [],
+    existingMediaToKeep,
+    existingImagesToKeep,
     uploadedMedia
   );
   const mediaUrls = mediaUrlSet(media);
-  const imageUrls = document.getElementById('fImg').value
-    .split(',')
-    .map(s => s.trim())
+  const imageUrls = [...currentFImgUrls]
     .filter(url => shouldUseExternalUrl(url) && !mediaUrls.has(url));
   const item = normalizeProductMeta({
     id: appState.editingId || crypto.randomUUID(),

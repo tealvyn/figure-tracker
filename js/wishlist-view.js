@@ -206,15 +206,29 @@ export function saveWish() {
   const name = document.getElementById('wName').value.trim();
   if (!name) { alert(t('alert.wishNameRequired')); return; }
   const rawUrls = (document.getElementById('wImg')?.value || '')
-    .split(/[\n,]+/)
+    .split(/[\s,]+/)
     .map(s => s.trim())
     .filter(Boolean);
+  
+  const currentWImgUrls = new Set(rawUrls);
+
   const existingWish = appState.editingWishId
     ? (state.wishlist || []).find(w => w.id === appState.editingWishId)
     : null;
+
+  const existingMediaToKeep = (existingWish?.media || []).filter(m => {
+    const url = getMediaUrl(m);
+    return !url || currentWImgUrls.has(url);
+  });
+  
+  const existingImagesToKeep = (existingWish?.images || []).filter(m => {
+    const url = getMediaUrl(m);
+    return !url || currentWImgUrls.has(url);
+  });
+
   const baseMedia = mergeMediaByUrl(
-    existingWish?.media || [],
-    existingWish?.images || [],
+    existingMediaToKeep,
+    existingImagesToKeep,
     appState.pendingWishUploadedMedia || [],
     appState.pendingUploadedWishMedia || []
   );
@@ -347,7 +361,10 @@ export function renderWishlist() {
   const grid = document.getElementById('wishGrid');
   if (!grid) return;
   if (!wishes.length) {
-    grid.innerHTML = `<div style="color:var(--muted);padding:40px 0;grid-column:1/-1;text-align:center;">${t('wishlist.empty')}</div>`;
+    const isFiltered = allWishes.length > 0;
+    grid.innerHTML = `<div style="color:var(--muted);padding:40px 0;grid-column:1/-1;text-align:center;">
+      ${isFiltered ? `Ничего не найдено по текущим фильтрам.<br><br><button type="button" class="btn btn-sm" onclick="window.resetAllFilters?.()">Сбросить фильтры</button>` : t('wishlist.empty')}
+    </div>`;
     return;
   }
   grid.innerHTML = wishes.map(w => {

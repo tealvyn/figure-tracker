@@ -161,7 +161,7 @@ function renderDashboardTaskRows(tasks) {
 
 export function renderCollectionStatusBar(statusCounts, totalOrders = 0) {
   return `<div class="status-filter-row">
-    <span class="badge" style="cursor:pointer;background:var(--line);" onclick="appState.filterStatus=null;render()">Все: ${totalOrders}</span>
+    <span class="badge" style="cursor:pointer;background:var(--line);" onclick="if(window.resetAllFilters){window.resetAllFilters()}else{appState.filterStatus=null;render()}">Все: ${totalOrders}</span>
     <span class="badge badge-unpaid" style="cursor:pointer;" onclick="appState.filterStatus='Не оплачено';render()">⏳ Не оплачено: ${statusCounts['Не оплачено']}</span>
     <span class="badge badge-deposit" style="cursor:pointer;" onclick="appState.filterStatus='Депозит оплачен';render()">💳 Депозит: ${statusCounts['Депозит оплачен']}</span>
     <span class="badge badge-paid" style="cursor:pointer;" onclick="appState.filterStatus='Полностью оплачено';render()">✅ Оплачено: ${statusCounts['Полностью оплачено']}</span>
@@ -171,7 +171,7 @@ export function renderCollectionStatusBar(statusCounts, totalOrders = 0) {
 }
 
 export function renderOrderGridCards(orders) {
-  if (!orders.length) return '<div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1;">Нет заказов</div>';
+  if (!orders.length) return `<div style="color:var(--muted);padding:40px 0;text-align:center;grid-column:1/-1;">Нет заказов по текущим фильтрам.<br><br><button type="button" class="btn btn-sm" onclick="window.resetAllFilters?.()">Сбросить фильтры</button></div>`;
   return orders.map(order => {
     const c = calcOrder(order);
     const status = orderStatus(order);
@@ -236,7 +236,7 @@ export function renderCollectionHome({ orders, allOrders, totals, statusCounts, 
 
     ${statusBar}
 
-    <div class="dashboard-section-head"><div><strong>Заказы</strong><span>${orders.length} по текущим фильтрам</span></div></div>
+    <div class="dashboard-section-head"><div><strong>Заказы</strong><span>${orders.length} по текущим фильтрам ${orders.length < allOrders.length ? `<button type="button" class="btn btn-sm" style="margin-left:8px;padding:2px 8px;font-size:12px;cursor:pointer;" onclick="window.resetAllFilters?.()">Сбросить фильтры</button>` : ''}</span></div></div>
     <div class="orders-grid fade-in" style="animation-delay:120ms">${renderOrderGridCards(orders)}</div>
   </div>`;
 }
